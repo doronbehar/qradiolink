@@ -8,6 +8,7 @@
 #include <QImage>
 #include <vector>
 #include <QMap>
+#include <QOpenGLWidget>
 
 #define HORZ_DIVS_MAX 20    //50
 #define VERT_DIVS_MIN 20
@@ -18,7 +19,7 @@
 #define PEAK_H_TOLERANCE 2
 
 
-class CPlotter : public QFrame
+class CPlotter : public QOpenGLWidget
 {
     Q_OBJECT
 

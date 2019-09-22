@@ -89,6 +89,7 @@ int main(int argc, char *argv[])
 
 
     QApplication a(argc, argv);
+    a.setAttribute(Qt::AA_EnableHighDpiScaling);
     a.setStyleSheet("QToolTip { color: #ffffff; background-color: #2a82da; border: 0px solid white; }");
     QStringList arguments = QCoreApplication::arguments();
     QFontDatabase::addApplicationFont(":/fonts/res/LiquidCrystal-Normal.otf");

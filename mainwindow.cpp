@@ -165,6 +165,7 @@ MainWindow::MainWindow(Settings *settings, QWidget *parent) :
     _rssi = 0;
     QRect xy = this->geometry();
     ui->plotterContainer->resize(xy.right() -xy.left()-20,xy.bottom()-xy.top()-120);
+    ui->plotterFrame->resize(xy.right() -xy.left()-20,xy.bottom()-xy.top()-120);
     ui->secondaryTextDisplay->move(xy.left() + 5, xy.bottom() - 265);
     ui->plotterFrame->setSampleRate(1000000);
     ui->plotterFrame->setSpanFreq((quint32)1000000);
@@ -250,12 +251,14 @@ void MainWindow::resizeEvent(QResizeEvent *event)
     if((bool)_settings->show_controls)
     {
         ui->plotterContainer->resize(xy.right() -xy.left()-20,xy.bottom()-xy.top()-210);
+        ui->plotterFrame->resize(xy.right() -xy.left()-20,xy.bottom()-xy.top()-120);
         xy = ui->plotterContainer->geometry();
         ui->secondaryTextDisplay->move(xy.left(), xy.bottom() - 150);
     }
     else
     {
         ui->plotterContainer->resize(xy.right() -xy.left()-20,xy.bottom()-xy.top()-120);
+        ui->plotterFrame->resize(xy.right() -xy.left()-20,xy.bottom()-xy.top()-120);
         xy = ui->plotterContainer->geometry();
         ui->secondaryTextDisplay->move(xy.left(), xy.bottom() - 150);
     }

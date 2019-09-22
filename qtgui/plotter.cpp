@@ -111,13 +111,18 @@ static inline quint64 time_ms(void)
     "Drag and scroll X and Y axes for pan and zoom. " \
     "Drag filter edges to adjust filter."
 
-CPlotter::CPlotter(QWidget *parent) : QFrame(parent)
+CPlotter::CPlotter(QWidget *parent) : QOpenGLWidget(parent)
 {
+    QSurfaceFormat format;
+    format.setDepthBufferSize(24);
+    format.setStencilBufferSize(8);
+    format.setVersion(3, 2);
+    format.setProfile(QSurfaceFormat::CoreProfile);
+    setFormat(format);
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     setFocusPolicy(Qt::StrongFocus);
-    setAttribute(Qt::WA_PaintOnScreen,false);
     setAutoFillBackground(false);
-    setAttribute(Qt::WA_OpaquePaintEvent, false);
+    setUpdateBehavior(PartialUpdate);
     setAttribute(Qt::WA_NoSystemBackground, true);
     setMouseTracking(true);
 
