@@ -140,9 +140,20 @@ gr_demod_base::gr_demod_base(QObject *parent, float device_frequency,
     _lsb = make_gr_demod_ssb_sdr(1, 1000000,1700,2500);
     _wfm = make_gr_demod_wbfm_sdr(0, 1000000,1700,75000);
     _freedv_rx1600_usb = make_gr_demod_freedv(125, 1000000, 1700, 2500, gr::vocoder::freedv_api::MODE_1600, 0);
+
+#ifdef FREEDV_MODE_700C
     _freedv_rx700C_usb = make_gr_demod_freedv(125, 1000000, 1700, 2500, gr::vocoder::freedv_api::MODE_700C, 0);
+#else
+    _freedv_rx700C_usb = make_gr_demod_freedv(125, 1000000, 1700, 2500, gr::vocoder::freedv_api::MODE_700, 0);
+#endif
+
     _freedv_rx1600_lsb = make_gr_demod_freedv(125, 1000000, 1700, 2500, gr::vocoder::freedv_api::MODE_1600, 1);
+
+#ifdef FREEDV_MODE_700C
     _freedv_rx700C_lsb = make_gr_demod_freedv(125, 1000000, 1700, 2500, gr::vocoder::freedv_api::MODE_700C, 1);
+#else
+    _freedv_rx700C_lsb = make_gr_demod_freedv(125, 1000000, 1700, 2500, gr::vocoder::freedv_api::MODE_700, 1);
+#endif
 
 
 }
@@ -436,6 +447,7 @@ void gr_demod_base::set_mode(int mode, bool disconnect, bool connect)
             _top_block->connect(_demod_valve,0,_wfm,0);
             _top_block->connect(_wfm,0,_rssi_valve,0);
             _top_block->connect(_wfm,1,_audio_sink,0);
+        break;
         default:
             break;
         }
@@ -683,7 +695,7 @@ void gr_demod_base::set_samp_rate(int samp_rate)
         _resampler.reset();
         std::vector<float> taps;
         int tw = std::min(_samp_rate/4, 1500000);
-        taps = gr::filter::firdes::low_pass(1, _samp_rate, 500000, tw, gr::filter::firdes::WIN_BLACKMAN_HARRIS);
+        taps = gr::filter::firdes::low_pass(1, _samp_rate, 480000, 100000, gr::filter::firdes::WIN_BLACKMAN_HARRIS);
 
         _resampler = gr::filter::rational_resampler_base_ccf::make(1, decimation, taps);
         _top_block->connect(_rotator,0, _resampler,0);
