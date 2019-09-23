@@ -113,12 +113,22 @@ static inline quint64 time_ms(void)
 
 CPlotter::CPlotter(QWidget *parent) : QOpenGLWidget(parent)
 {
+
+    m_opengl_device = new QOpenGLPaintDevice;
+    //glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+    m_opengl_device->setSize(size());
+    m_opengl_device->setDevicePixelRatio(devicePixelRatio());
     QSurfaceFormat format;
     format.setDepthBufferSize(24);
     format.setStencilBufferSize(8);
     format.setVersion(3, 2);
+    format.setSamples(8);
     format.setProfile(QSurfaceFormat::CoreProfile);
-    setFormat(format);
+    m_opengl_context = new QOpenGLContext(this);
+    m_opengl_context->setFormat(format);
+    m_opengl_context->create();
+
+
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     setFocusPolicy(Qt::StrongFocus);
     setAutoFillBackground(false);
@@ -858,6 +868,7 @@ void CPlotter::wheelEvent(QWheelEvent * event)
 }
 
 // Called when screen size changes so must recalculate bitmaps
+/*
 void CPlotter::resizeEvent(QResizeEvent* )
 {
     if (!size().isValid())
@@ -868,7 +879,52 @@ void CPlotter::resizeEvent(QResizeEvent* )
         // if changed, resize pixmaps to new screensize
         int     fft_plot_height;
 
+        //m_opengl_device->setDevicePixelRatio();
+
         m_Size = size();
+        fft_plot_height = m_Percent2DScreen * m_Size.height() / 100;
+        m_OverlayPixmap = QPixmap(m_Size.width(), fft_plot_height);
+        m_OverlayPixmap.fill(Qt::black);
+        m_2DPixmap = QPixmap(m_Size.width(), fft_plot_height);
+        m_2DPixmap.fill(Qt::black);
+
+        int height = (100 - m_Percent2DScreen) * m_Size.height() / 100;
+        if (m_WaterfallPixmap.isNull())
+        {
+            m_WaterfallPixmap = QPixmap(m_Size.width(), height);
+            m_WaterfallPixmap.fill(Qt::black);
+        }
+        else
+        {
+            m_WaterfallPixmap = m_WaterfallPixmap.scaled(m_Size.width(), height,
+                                                         Qt::KeepAspectRatio,
+                                                         Qt::SmoothTransformation);
+        }
+
+        m_PeakHoldValid = false;
+
+        if (wf_span > 0)
+            msec_per_wfline = wf_span / height;
+        memset(m_wfbuf, 255, MAX_SCREENSIZE);
+    }
+
+    drawOverlay();
+}
+*/
+
+void CPlotter::resizeGL(int w, int h)
+{
+    if (!size().isValid())
+        return;
+
+    if (m_Size != size())
+    {
+        // if changed, resize pixmaps to new screensize
+        int     fft_plot_height;
+
+        //m_opengl_device->setDevicePixelRatio();
+
+        m_Size = QSize(w,h);
         fft_plot_height = m_Percent2DScreen * m_Size.height() / 100;
         m_OverlayPixmap = QPixmap(m_Size.width(), fft_plot_height);
         m_OverlayPixmap.fill(Qt::black);
@@ -901,11 +957,14 @@ void CPlotter::resizeEvent(QResizeEvent* )
 // Called by QT when screen needs to be redrawn
 void CPlotter::paintEvent(QPaintEvent *)
 {
+    glEnable(GL_MULTISAMPLE);
     QPainter painter(this);
-
+    //this->makeCurrent();
+    //m_opengl_device->context()->makeCurrent();
     painter.drawPixmap(0, 0, m_2DPixmap);
     painter.drawPixmap(0, m_Percent2DScreen * m_Size.height() / 100,
                        m_WaterfallPixmap);
+
 }
 
 // Called to update spectrum data for displaying on the screen

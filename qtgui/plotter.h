@@ -30,6 +30,7 @@ public:
     QSize minimumSizeHint() const;
     QSize sizeHint() const;
 
+
     //void SetSdrInterface(CSdrInterface* ptr){m_pSdrInterface = ptr;}
     void draw();		//call to draw new fft data onto screen plot
     void setRunningState(bool running) { m_Running = running; }
@@ -151,13 +152,14 @@ public slots:
     {
         m_Percent2DScreen = percent;
         m_Size = QSize(0,0);
-        resizeEvent(NULL);
+        resizeGL(size().width(), size().height());
     }
 
 protected:
     //re-implemented widget event handlers
     void paintEvent(QPaintEvent *event);
-    void resizeEvent(QResizeEvent* event);
+    //void resizeEvent(QResizeEvent* event);
+    void resizeGL(int w, int h);
     void mouseMoveEvent(QMouseEvent * event);
     void mousePressEvent(QMouseEvent * event);
     void mouseReleaseEvent(QMouseEvent * event);
@@ -276,6 +278,8 @@ private:
     quint64     msec_per_wfline;    // milliseconds between waterfall updates
     quint64     wf_span;            // waterfall span in milliseconds (0 = auto)
     int         fft_rate;           // expected FFT rate (needed when WF span is auto)
+    QOpenGLContext *m_opengl_context;
+    QOpenGLPaintDevice *m_opengl_device;
 };
 
 #endif // PLOTTER_H
