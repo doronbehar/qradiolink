@@ -157,9 +157,11 @@ public slots:
 
 protected:
     //re-implemented widget event handlers
-    void paintEvent(QPaintEvent *event);
+    //void paintEvent(QPaintEvent *event);
+    void paintGL();
     //void resizeEvent(QResizeEvent* event);
     void resizeGL(int w, int h);
+    void initializeGL();
     void mouseMoveEvent(QMouseEvent * event);
     void mousePressEvent(QMouseEvent * event);
     void mouseReleaseEvent(QMouseEvent * event);

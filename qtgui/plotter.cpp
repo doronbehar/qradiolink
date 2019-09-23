@@ -227,6 +227,33 @@ CPlotter::~CPlotter()
 {
 }
 
+void CPlotter::initializeGL()
+{
+    glClearColor( 0.1f, 0.1f, 0.2f, 1.0f );
+
+    //m_texture = new QOpenGLTexture( QImage( ":/Textures/Blocks.jpg" ) );
+
+    //QOpenGLShader vShader( QOpenGLShader::Vertex );
+    //vShader.compileSourceFile( ":/Shaders/vShader.glsl" );
+
+    //QOpenGLShader fShader( QOpenGLShader::Fragment );
+    //fShader.compileSourceFile( ":/Shaders/fShader.glsl" );
+
+    //m_program.addShader( &vShader );
+    //m_program.addShader( &fShader );
+    //m_program.link();
+
+    //m_vertexAttr = m_program.attributeLocation( "vertex" );
+    //m_texCoordAttr = m_program.attributeLocation( "texCoord" );
+    //m_matrixUniform = m_program.uniformLocation( "matrix" );
+    //m_texUniform = m_program.uniformLocation( "tex" );
+
+    glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+    glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+
+    glEnable( GL_DEPTH_TEST );
+}
+
 QSize CPlotter::minimumSizeHint() const
 {
     return QSize(50, 50);
@@ -955,12 +982,51 @@ void CPlotter::resizeGL(int w, int h)
 }
 
 // Called by QT when screen needs to be redrawn
+/*
 void CPlotter::paintEvent(QPaintEvent *)
 {
     glEnable(GL_MULTISAMPLE);
     QPainter painter(this);
     //this->makeCurrent();
     //m_opengl_device->context()->makeCurrent();
+    painter.drawPixmap(0, 0, m_2DPixmap);
+    painter.drawPixmap(0, m_Percent2DScreen * m_Size.height() / 100,
+                       m_WaterfallPixmap);
+
+}
+*/
+
+void CPlotter::paintGL()
+{
+    glEnable(GL_MULTISAMPLE);
+    //QOpenGLTexture fft_texture(m_2DPixmap.toImage());
+    //QOpenGLTexture wf_texture(m_WaterfallPixmap.toImage());
+    QPainter painter(this);
+    painter.beginNativePainting();
+    glClearColor( 0.1f, 0.1f, 0.2f, 1.0f );
+    glClear( GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT );
+
+    glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+    glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+    //fft_texture.bind();
+    //glDrawArrays(GL_TRIANGLE_FAN, 4, 4);
+    //GLuint textureId;
+    //glGenTextures(1, &textureId);
+    //glBindTexture(GL_TEXTURE_2D, textureId);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+    //glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 0, m_Size.width(),  m_Size.height(), GL_RGB, GL_UNSIGNED_BYTE, m_2DPixmap.toImage().bits());
+    // Subsequent frames
+    //glTexSubImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 0, m_Size.width(),  m_Size.height(), GL_RGB, GL_UNSIGNED_BYTE, m_WaterfallPixmap.toImage().bits());
+
+    // Destruction
+    //glDeleteTextures(1, &textureId);
+    //wf_texture.bind();
+    painter.endNativePainting();
+
     painter.drawPixmap(0, 0, m_2DPixmap);
     painter.drawPixmap(0, m_Percent2DScreen * m_Size.height() / 100,
                        m_WaterfallPixmap);
@@ -1026,7 +1092,7 @@ void CPlotter::draw()
             m_WaterfallPixmap.scroll(0, 1, 0, 0, w, h);
 
             QPainter painter1(&m_WaterfallPixmap);
-            //painter1.setRenderHint(QPainter::HighQualityAntialiasing);
+            painter1.setRenderHint(QPainter::HighQualityAntialiasing);
             painter1.setCompositionMode(QPainter::CompositionMode_Source);
 
             // draw new line of fft data at top of waterfall bitmap
@@ -1067,7 +1133,7 @@ void CPlotter::draw()
         m_2DPixmap = m_OverlayPixmap.copy(0,0,w,h);
 
         QPainter painter2(&m_2DPixmap);
-        painter2.setRenderHint(QPainter::SmoothPixmapTransform);
+        painter2.setRenderHint(QPainter::HighQualityAntialiasing);
 
 // workaround for "fixed" line drawing since Qt 5
 // see http://stackoverflow.com/questions/16990326
