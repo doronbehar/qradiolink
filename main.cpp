@@ -14,7 +14,6 @@
 // along with this program; if not, write to the Free Software
 // Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
-#include "mainwindow.h"
 #include <QApplication>
 #include <QCoreApplication>
 #include <QThread>
@@ -28,21 +27,17 @@
 #include <QtGlobal>
 #include <QTextStream>
 #include <iostream>
+#include "mainwindow.h"
 #include "dtmfdecoder.h"
 #include "databaseapi.h"
-#include "serverwrapper.h"
 #include "config_defines.h"
-#if 0
-#include "controller.h"
-#endif
 #include "mumbleclient.h"
-#include "audioop.h"
 #include "audiowriter.h"
 #include "audioreader.h"
-#include "dtmfcommand.h"
 #include "station.h"
 #include "mumblechannel.h"
-#include "radioop.h"
+#include "radiochannel.h"
+#include "radiocontroller.h"
 
 
 #if QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)
@@ -90,7 +85,7 @@ int main(int argc, char *argv[])
 
     QApplication a(argc, argv);
     a.setAttribute(Qt::AA_EnableHighDpiScaling);
-    a.setStyleSheet("QToolTip { color: #ffffff; background-color: #2a82da; border: 0px solid white; }");
+
     QStringList arguments = QCoreApplication::arguments();
     QFontDatabase::addApplicationFont(":/fonts/res/LiquidCrystal-Normal.otf");
     QFontDatabase::addApplicationFont(":/fonts/res/LiquidCrystal-Bold.otf");
@@ -102,13 +97,13 @@ int main(int argc, char *argv[])
     std::cout << "Starting qradiolink instance: " << start_time << std::endl;
     DatabaseApi db;
     Settings *settings = new Settings;
+    RadioChannels *radio_channels = new RadioChannels;
     settings->readConfig();
     MumbleClient *client = new MumbleClient(settings);
-    RadioOp *radio_op = new RadioOp(settings);
+    RadioController *radio_op = new RadioController(settings);
     AudioWriter *audiowriter = new AudioWriter;
     AudioReader *audioreader = new AudioReader;
-    MainWindow *w = new MainWindow(settings);
-    w->setWindowTitle("QRadioLink");
+    MainWindow *w = new MainWindow(settings, radio_channels);
 
     w->show();
     if(arguments.length() > 1 && arguments.at(1) == "-f")
@@ -119,12 +114,6 @@ int main(int argc, char *argv[])
     w->activateWindow();
     w->raise();
 
-    /* Uncomment later
-    DtmfCommand *dtmfcommand = new DtmfCommand(settings, &db,client);
-    QObject::connect(client,SIGNAL(channelReady(int)),dtmfcommand,SLOT(channelReady(int)));
-    QObject::connect(client,SIGNAL(newStation(Station*)),dtmfcommand,SLOT(newStation(Station*)));
-    QObject::connect(client,SIGNAL(leftStation(Station*)),dtmfcommand,SLOT(leftStation(Station*)));
-    */
     /*
     QThread *t1= new QThread;
     DtmfDecoder *decoder = new DtmfDecoder(settings);
@@ -132,11 +121,6 @@ int main(int argc, char *argv[])
     {
 
         decoder->moveToThread(t1);
-
-        QObject::connect(decoder,SIGNAL(haveCall(QVector<char>*)),dtmfcommand,SLOT(haveCall(QVector<char>*)));
-        QObject::connect(decoder,SIGNAL(haveCommand(QVector<char>*)),dtmfcommand,SLOT(haveCommand(QVector<char>*)));
-        QObject::connect(dtmfcommand,SIGNAL(readyInput()),decoder,SLOT(resetInput()));
-
         QObject::connect(t1, SIGNAL(started()), decoder, SLOT(run()));
         QObject::connect(decoder, SIGNAL(finished()), t1, SLOT(quit()));
         QObject::connect(decoder, SIGNAL(finished()), decoder, SLOT(deleteLater()));
@@ -160,18 +144,6 @@ int main(int argc, char *argv[])
     QObject::connect(t2, SIGNAL(finished()), t2, SLOT(deleteLater()));
     t2->start();
 
-
-
-    QThread *t3 = new QThread;
-    AudioOp *audio_op = new AudioOp(settings);
-    audio_op->moveToThread(t3);
-    QObject::connect(audio_op,SIGNAL(audioData(short*,short)),client,SLOT(processAudio(short*,short)));
-    QObject::connect(client,SIGNAL(pcmAudio(short*,short)),audio_op,SLOT(pcmAudio(short*,short)));
-    QObject::connect(t3, SIGNAL(started()), audio_op, SLOT(run()));
-    QObject::connect(audio_op, SIGNAL(finished()), t3, SLOT(quit()));
-    QObject::connect(audio_op, SIGNAL(finished()), audio_op, SLOT(deleteLater()));
-    QObject::connect(t3, SIGNAL(finished()), t3, SLOT(deleteLater()));
-    t3->start();
     */
 
 
@@ -213,8 +185,10 @@ int main(int argc, char *argv[])
     QObject::connect(w,SIGNAL(tuneFreq(qint64)),radio_op,SLOT(tuneFreq(qint64)));
     QObject::connect(w,SIGNAL(tuneTxFreq(qint64)),radio_op,SLOT(tuneTxFreq(qint64)));
     QObject::connect(w,SIGNAL(changeTxShift(qint64)),radio_op,SLOT(changeTxShift(qint64)));
-    QObject::connect(w,SIGNAL(startAutoTuneFreq(int, int)),radio_op,SLOT(startAutoTune(int, int)));
-    QObject::connect(w,SIGNAL(stopAutoTuneFreq()),radio_op,SLOT(stopAutoTune()));
+    QObject::connect(w,SIGNAL(startAutoTuneFreq(int, int)),radio_op,SLOT(startScan(int, int)));
+    QObject::connect(w,SIGNAL(stopAutoTuneFreq()),radio_op,SLOT(stopScan()));
+    QObject::connect(w,SIGNAL(startMemoryTune(RadioChannels*, int)),radio_op,SLOT(startMemoryScan(RadioChannels*, int)));
+    QObject::connect(w,SIGNAL(stopMemoryTune()),radio_op,SLOT(stopMemoryScan()));
     QObject::connect(w,SIGNAL(fineTuneFreq(long)),radio_op,SLOT(fineTuneFreq(long)));
     QObject::connect(w,SIGNAL(setTxPower(int)),radio_op,SLOT(setTxPower(int)));
     //QObject::connect(w,SIGNAL(setBbGain(int)),radio_op,SLOT(setBbGain(int)));
@@ -276,5 +250,7 @@ int main(int argc, char *argv[])
     client->disconnectFromServer();
     delete w;
     delete client;
+    delete radio_channels;
+    delete settings;
     return ret;
 }

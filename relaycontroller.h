@@ -1,4 +1,4 @@
-// Written by Adrian Musceac YO8RZZ , started October 2013.
+// Written by Adrian Musceac YO8RZZ , started October 2019.
 //
 // This program is free software; you can redistribute it and/or
 // modify it under the terms of the GNU General Public License as
@@ -14,28 +14,30 @@
 // along with this program; if not, write to the Free Software
 // Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
-#include "speech.h"
+#ifndef RELAYCONTROLLER_H
+#define RELAYCONTROLLER_H
 
-Speech::Speech(QObject *parent) :
-    QObject(parent)
+#include <QObject>
+#include <ftdi.h>
+#include <iostream>
+
+class RelayController : public QObject
 {
-    //_audio = new AudioInterface;
-    int heap_size = 210000;
-    int load_init_files = 1;
-#if 0
-    festival_initialize(load_init_files,heap_size);
-#endif
-}
+    Q_OBJECT
+public:
+    explicit RelayController(QObject *parent = nullptr);
+    ~RelayController();
 
-void Speech::fspeak(char* text)
-{
-#if 0
-    festival_say_text(text);
-#endif
-    /// If we wait for the spooler to complete speech, we risk
-    /// to return too late for other events in the queue
-    /// so let's make this asynchronous
-    //festival_wait_for_spooler();
-}
+signals:
 
+public slots:
+    int enableRelay(int relay_number);
+    int disableRelay(int relay_number);
 
+private:
+    struct ftdi_context *_ftdi_relay;
+    bool _ftdi_relay_enabled;
+    unsigned char *_relay_mask;
+};
+
+#endif // RELAYCONTROLLER_H

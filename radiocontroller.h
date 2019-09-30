@@ -31,20 +31,22 @@
 #include <iostream>
 #include <unistd.h>
 #include <math.h>
+#include <gnuradio/digital/crc32.h>
+#include <libconfig.h++>
+#include <ftdi.h>
 #include "audio/audiointerface.h"
-#include "ext/agc.h"
-#include "ext/vox.h"
 #include "settings.h"
+#include "radiochannel.h"
 #include "mumblechannel.h"
 #include "radioprotocol.h"
+#include "relaycontroller.h"
 #include "station.h"
 #include "audio/audioencoder.h"
 #include "video/videoencoder.h"
 #include "audio/alsaaudio.h"
 #include "gr/gr_modem.h"
 #include "net/netdevice.h"
-#include <gnuradio/digital/crc32.h>
-#include <libconfig.h++>
+
 
 typedef QVector<Station> StationList;
 typedef std::vector<std::complex<float>> complex_vector;
@@ -57,13 +59,13 @@ namespace radio_type
     };
 }
 
-class RadioOp : public QObject
+class RadioController : public QObject
 {
     Q_OBJECT
 public:
-    explicit RadioOp(Settings *settings,
+    explicit RadioController(Settings *settings,
                       QObject *parent = 0);
-    ~RadioOp();
+    ~RadioController();
 
     void flushVoipBuffer();
     void updateDataModemReset(bool transmitting, bool ptt_activated);
@@ -131,8 +133,10 @@ public slots:
     void enableRSSI(bool value);
     void enableDuplex(bool value);
     void scan(bool receiving, bool wait_for_timer=true);
-    void startAutoTune(int step, int direction);
-    void stopAutoTune();
+    void startScan(int step, int direction);
+    void stopScan();
+    void startMemoryScan(RadioChannels *mem, int direction);
+    void stopMemoryScan();
     void endAudioTransmission();
     void processVoipAudioFrame(short *pcm, int samples, quint64 sid);
     void usePTTForVOIP(bool value);
@@ -151,83 +155,6 @@ public slots:
     void setRxSampleRate(int samp_rate);
 
 private:
-    bool _stop;
-    bool _tx_inited;
-    bool _rx_inited;
-    bool _voip_enabled;
-    bool _voip_forwarding;
-#if 0
-    AlsaAudio *_audio;
-#endif
-    AudioInterface *_audio;
-    Settings *_settings;
-    bool _transmitting_audio;
-    bool _process_text;
-    bool _repeat_text;
-    QString _text_out;
-    QString _callsign;
-    QMutex *_mutex;
-    QTimer *_voice_led_timer;
-    QTimer *_data_led_timer;
-    QTimer *_vox_timer;
-    AudioEncoder *_codec;
-    VideoEncoder *_video;
-    NetDevice *_net_device;
-    gr_modem *_modem;
-    RadioProtocol *_radio_protocol;
-    int _rx_mode;
-    int _tx_mode;
-    int _rx_radio_type;
-    int _tx_radio_type;
-    long long _rx_frequency;
-    long long _tx_frequency;
-    long long _autotune_freq;
-    long long _tune_shift_freq;
-    float _tx_power;
-    int _bb_gain;
-    int _squelch;
-    double _rx_sensitivity;
-    int _step_hz;
-    int _scan_step_hz;
-    int _tune_limit_lower;
-    int _tune_limit_upper;
-    bool _tuning_done;
-    bool _tx_modem_started;
-    int _tune_counter;
-    float _rx_ctcss;
-    float _tx_ctcss;
-    float _rx_volume;
-    long long _rx_sample_rate;
-    QElapsedTimer _last_voiced_frame_timer;
-    QTimer *_voip_tx_timer;
-    QTimer *_end_tx_timer;
-    QElapsedTimer *_data_read_timer;
-    QElapsedTimer *_data_modem_reset_timer;
-    QElapsedTimer *_data_modem_sleep_timer;
-    bool _data_modem_sleeping;
-    unsigned char *_rand_frame_data;
-    std::vector<short> *_m_queue;
-    quint64 _last_session_id;
-    QVector<short> *_voip_encode_buffer;
-    QByteArray *_data_rec_sound;
-    QByteArray *_end_rec_sound;
-    bool _repeat;
-    bool _vox_enabled;
-    bool _tx_started;
-    int _freq_gui_counter;
-    qint64 _carrier_offset;
-    float *_fft_data;
-    bool _fft_enabled;
-    int _fft_poll_time;
-    bool _constellation_enabled;
-    bool _rssi_enabled;
-    bool _duplex_enabled;
-    QElapsedTimer *_fft_read_timer;
-    QElapsedTimer *_const_read_timer;
-    QElapsedTimer *_rssi_read_timer;
-    QElapsedTimer *_scan_timer;
-    bool _scan_stop;
-
     void readConfig(std::string &rx_device_args, std::string &tx_device_args,
                     std::string &rx_antenna, std::string &tx_antenna, int &rx_freq_corr,
                     int &tx_freq_corr, std::string &callsign, std::string &video_device);
@@ -246,6 +173,94 @@ private:
     void getFFTData();
     void getConstellationData();
     void getRSSI();
+    void setRelays(bool transmitting);
+    void memoryScan(bool receiving, bool wait_for_timer=true);
+
+    // FIXME: inflation of members
+    AudioInterface *_audio;
+    Settings *_settings;
+    RelayController *_relay_controller;
+    AudioEncoder *_codec;
+    VideoEncoder *_video;
+    NetDevice *_net_device;
+    gr_modem *_modem;
+    RadioProtocol *_radio_protocol;
+    QMutex *_mutex;
+    QTimer *_voice_led_timer;
+    QTimer *_data_led_timer;
+    QTimer *_vox_timer;
+    QTimer *_voip_tx_timer;
+    QTimer *_end_tx_timer;
+    QElapsedTimer *_data_read_timer;
+    QElapsedTimer *_data_modem_reset_timer;
+    QElapsedTimer *_data_modem_sleep_timer;
+    QElapsedTimer *_fft_read_timer;
+    QElapsedTimer *_const_read_timer;
+    QElapsedTimer *_rssi_read_timer;
+    QElapsedTimer *_scan_timer;
+    std::vector<short> *_m_queue;
+    unsigned char *_rand_frame_data;
+    float *_fft_data;
+    QVector<short> *_voip_encode_buffer;
+    QByteArray *_data_rec_sound;
+    QByteArray *_end_rec_sound;
+
+    bool _stop;
+    bool _tx_inited;
+    bool _rx_inited;
+    bool _voip_enabled;
+    bool _voip_forwarding;
+#if 0
+    AlsaAudio *_audio;
+#endif
+
+    bool _transmitting_audio;
+    bool _process_text;
+    bool _repeat_text;
+    QString _text_out;
+    QString _callsign;
+
+
+    int _rx_mode;
+    int _tx_mode;
+    int _rx_radio_type;
+    int _tx_radio_type;
+    long long _rx_frequency;
+    long long _tx_frequency;
+    long long _autotune_freq;
+    long long _tune_shift_freq;
+    float _tx_power;
+    int _bb_gain;
+    int _squelch;
+    double _rx_sensitivity;
+    int _step_hz;
+    int _scan_step_hz;
+    int _tune_limit_lower;
+    int _tune_limit_upper;
+    bool _scan_done;
+    int _memory_scan_index;
+    bool _memory_scan_done;
+    bool _tx_modem_started;
+    int _tune_counter;
+    float _rx_ctcss;
+    float _tx_ctcss;
+    float _rx_volume;
+    long long _rx_sample_rate;
+    QElapsedTimer _last_voiced_frame_timer;
+    bool _data_modem_sleeping;
+    quint64 _last_session_id;
+    bool _repeat;
+    bool _vox_enabled;
+    bool _tx_started;
+    int _freq_gui_counter;
+    qint64 _carrier_offset;
+    bool _fft_enabled;
+    int _fft_poll_time;
+    bool _constellation_enabled;
+    bool _rssi_enabled;
+    bool _duplex_enabled;
+    bool _scan_stop;
+    QList<radiochannel*> _memory_channels;
 
 };
 

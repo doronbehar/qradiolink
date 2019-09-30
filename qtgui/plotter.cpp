@@ -204,7 +204,7 @@ CPlotter::CPlotter(QWidget *parent) : QOpenGLWidget(parent)
     m_GrabPosition = 0;
     m_Percent2DScreen = 30;	//percent of screen used for 2D display
     m_VdivDelta = 30;
-    m_HdivDelta = 70;
+    m_HdivDelta = 100;
 
     m_FreqDigits = 3;
 
@@ -351,8 +351,8 @@ void CPlotter::mouseMoveEvent(QMouseEvent* event)
                 }
                 if (m_TooltipsEnabled)
                     QToolTip::showText(event->globalPos(),
-                                       QString("F: %1 kHz")
-                                       .arg(freqFromX(pt.x())/1.e3f, 0, 'f', 3),
+                                       QString("F: %1 kHz \n%2 dBFS")
+                                       .arg(freqFromX(pt.x())/1.e3f, 0, 'f', 3).arg(dbFromY(pt.y()), 1, 10, 3),
                                        this);
             }
             m_GrabPosition = 0;
@@ -820,7 +820,7 @@ void CPlotter::zoomStepX(float step, int x)
 
     float factor = (float)m_SampleFreq / (float)m_Span;
     emit newZoomLevel(factor);
-    qDebug() << QString("Spectrum zoom: %1x").arg(factor, 0, 'f', 1);
+    //qDebug() << QString("Spectrum zoom: %1x").arg(factor, 0, 'f', 1);
 
     m_PeakHoldValid = false;
 }
@@ -1047,7 +1047,7 @@ void CPlotter::draw()
         m_DrawOverlay = false;
     }
 
-    QPoint LineBuf[MAX_SCREENSIZE];
+
 
     if (!m_Running)
         return;
@@ -1304,7 +1304,7 @@ void CPlotter::getScreenIntegerFFTData(qint32 plotHeight, qint32 plotWidth,
     qint32 m_FFTSize = m_fftDataSize;
     float *m_pFFTAveBuf = inBuf;
     float  dBGainFactor = ((float)plotHeight) / fabs(maxdB - mindB);
-    qint32* m_pTranslateTbl = new qint32[qMax(m_FFTSize, plotWidth)];
+    //qint32* m_pTranslateTbl = new qint32[qMax(m_FFTSize, plotWidth)];
 
     /** FIXME: qint64 -> qint32 **/
     m_BinMin = (qint32)((float)startFreq * (float)m_FFTSize / m_SampleFreq);
@@ -1324,24 +1324,13 @@ void CPlotter::getScreenIntegerFFTData(qint32 plotHeight, qint32 plotWidth,
     {
         // more FFT points than plot points
         for (i = minbin; i < maxbin; i++)
-            m_pTranslateTbl[i] = ((qint64)(i-m_BinMin)*plotWidth) / (m_BinMax - m_BinMin);
-        *xmin = m_pTranslateTbl[minbin];
-        *xmax = m_pTranslateTbl[maxbin - 1];
-    }
-    else
-    {
-        // more plot points than FFT points
-        for (i = 0; i < plotWidth; i++)
-            m_pTranslateTbl[i] = m_BinMin + (i*(m_BinMax - m_BinMin)) / plotWidth;
-        *xmin = 0;
-        *xmax = plotWidth;
-    }
-
-    if (largeFft)
-    {
-        // more FFT points than plot points
-        for (i = minbin; i < maxbin; i++ )
         {
+            if(i == minbin)
+                *xmin = ((qint64)(i-m_BinMin)*plotWidth) / (m_BinMax - m_BinMin);
+            if(i == (maxbin - 1))
+                *xmax = ((qint64)(i-m_BinMin)*plotWidth) / (m_BinMax - m_BinMin);
+
+            //m_pTranslateTbl[i] = ((qint64)(i-m_BinMin)*plotWidth) / (m_BinMax - m_BinMin);
             y = (qint32)(dBGainFactor*(maxdB-m_pFFTAveBuf[i]));
 
             if (y > plotHeight)
@@ -1349,7 +1338,7 @@ void CPlotter::getScreenIntegerFFTData(qint32 plotHeight, qint32 plotWidth,
             else if (y < 0)
                 y = 0;
 
-            x = m_pTranslateTbl[i];	//get fft bin to plot x coordinate transform
+            x = ((qint64)(i-m_BinMin)*plotWidth) / (m_BinMax - m_BinMin);	//get fft bin to plot x coordinate transform
 
             if (x == xprev)   // still mappped to same fft bin coordinate
             {
@@ -1367,28 +1356,32 @@ void CPlotter::getScreenIntegerFFTData(qint32 plotHeight, qint32 plotWidth,
                 ymax = y;
             }
         }
+
     }
     else
     {
         // more plot points than FFT points
-        for (x = 0; x < plotWidth; x++ )
+        for (i = 0; i < plotWidth; i++)
         {
-            i = m_pTranslateTbl[x]; // get plot to fft bin coordinate transform
-            if(i < 0 || i >= m_FFTSize)
+            //m_pTranslateTbl[i] = m_BinMin + (i*(m_BinMax - m_BinMin)) / plotWidth;
+            x = m_BinMin + (i*(m_BinMax - m_BinMin)) / plotWidth; // get plot to fft bin coordinate transform
+            if(x < 0 || x >= m_FFTSize)
                 y = plotHeight;
             else
-                y = (qint32)(dBGainFactor*(maxdB-m_pFFTAveBuf[i]));
+                y = (qint32)(dBGainFactor*(maxdB-m_pFFTAveBuf[x]));
 
             if (y > plotHeight)
                 y = plotHeight;
             else if (y < 0)
                 y = 0;
 
-            outBuf[x] = y;
+            outBuf[i] = y;
         }
+        *xmin = 0;
+        *xmax = plotWidth;
     }
 
-    delete [] m_pTranslateTbl;
+    //delete [] m_pTranslateTbl;
 }
 
 void CPlotter::setFftRange(float min, float max)
@@ -1487,7 +1480,7 @@ void CPlotter::drawOverlay()
     painter.setPen(QColor(PLOTTER_TEXT_COLOR));
     for (int i = 0; i <= m_HorDivs; i++)
     {
-        int tw = metrics.width(m_HDivText[i]);
+        int tw = metrics.width(m_HDivText[i]) + 3;
         x = (int)((float)i*pixperdiv + adjoffset);
         if (x > m_YAxisWidth)
         {
@@ -1645,6 +1638,15 @@ qint64 CPlotter::freqFromX(int x)
     qint64 StartFreq = m_CenterFreq + m_FftCenter - m_Span / 2;
     qint64 f = (qint64)(StartFreq + (float)m_Span * (float)x / (float)w);
     return f;
+}
+
+float CPlotter::dbFromY(int y)
+{
+    float delta_px = m_Yzero - y;
+    float delta_db = delta_px * fabs(m_PandMindB - m_PandMaxdB) /
+            (float)m_OverlayPixmap.height();
+    float db = m_PandMaxdB + delta_db;
+    return db;
 }
 
 /** Calculate time offset of a given line on the waterfall */

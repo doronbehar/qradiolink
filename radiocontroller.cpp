@@ -14,30 +14,20 @@
 // along with this program; if not, write to the Free Software
 // Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
-#include "radioop.h"
+#include "radiocontroller.h"
 
-RadioOp::RadioOp(Settings *settings, QObject *parent) :
+RadioController::RadioController(Settings *settings, QObject *parent) :
     QObject(parent)
 {
-    _rx_mode = gr_modem_types::ModemTypeBPSK2000;
-    _tx_mode = gr_modem_types::ModemTypeBPSK2000;
-    _rx_radio_type = radio_type::RADIO_TYPE_DIGITAL;
-    _tx_radio_type = radio_type::RADIO_TYPE_DIGITAL;
+    _settings = settings;
     _codec = new AudioEncoder;
     _radio_protocol = new RadioProtocol;
+    _relay_controller = new RelayController;
+    _video = new VideoEncoder;
+    _net_device = new NetDevice(0, _settings->ip_address);
     _mutex = new QMutex;
     _m_queue = new std::vector<short>;
-    _last_session_id = 0;
-    _net_device = 0;
-    _video = 0;
-    _stop =false;
-    _tx_inited = false;
-    _rx_inited = false;
-    _tx_started = false;
-    _voip_enabled = false;
-    _vox_enabled = false;
-    _voip_forwarding = false;
-    _last_voiced_frame_timer.start();
+
     _voip_tx_timer = new QTimer(this);
     _voip_tx_timer->setSingleShot(true);
     _vox_timer = new QTimer(this);
@@ -48,7 +38,6 @@ RadioOp::RadioOp(Settings *settings, QObject *parent) :
     _data_modem_reset_timer = new QElapsedTimer();
     _data_modem_sleep_timer = new QElapsedTimer();
     _scan_timer = new QElapsedTimer();
-    _scan_stop = false;
     _fft_read_timer = new QElapsedTimer();
     _fft_read_timer->start();
     _fft_poll_time = 75;
@@ -57,14 +46,28 @@ RadioOp::RadioOp(Settings *settings, QObject *parent) :
     _const_read_timer->start();
     _rssi_read_timer = new QElapsedTimer();
     _rssi_read_timer->start();
+
+    _last_session_id = 0;
+
+    _stop =false;
+    _tx_inited = false;
+    _rx_inited = false;
+    _tx_started = false;
+    _voip_enabled = false;
+    _vox_enabled = false;
+    _voip_forwarding = false;
+    _last_voiced_frame_timer.start();
+
+    _scan_stop = false;
+    _scan_done = true;
+    _memory_scan_done = true;
+
     _constellation_enabled = false;
     _data_modem_sleeping = false;
-    _settings = settings;
     _transmitting_audio = false;
     _process_text = false;
     _repeat_text = false;
     _repeat = false;
-    _settings = settings;
     _tx_power = 0;
     _bb_gain = 0;
     _rx_sensitivity = 0;
@@ -81,7 +84,12 @@ RadioOp::RadioOp(Settings *settings, QObject *parent) :
     _step_hz = 10;
     _carrier_offset = 0;
     _rx_sample_rate = 0;
-    _tuning_done = true;
+
+    _rx_mode = gr_modem_types::ModemTypeBPSK2000;
+    _tx_mode = gr_modem_types::ModemTypeBPSK2000;
+    _rx_radio_type = radio_type::RADIO_TYPE_DIGITAL;
+    _tx_radio_type = radio_type::RADIO_TYPE_DIGITAL;
+
     _tune_counter = 0;
     _freq_gui_counter = 0;
     _tx_modem_started = false;
@@ -130,23 +138,20 @@ RadioOp::RadioOp(Settings *settings, QObject *parent) :
         _end_rec_sound = new QByteArray(resfile_end_tx.readAll());
     }
 
-    _settings->readConfig();
     toggleRxMode(_settings->rx_mode);
     toggleTxMode(_settings->tx_mode);
 
 }
 
-RadioOp::~RadioOp()
+RadioController::~RadioController()
 {
     if(_rx_inited)
         toggleRX(false);
     if(_tx_inited)
         toggleTX(false);
     delete _codec;
-    if(_video != 0)
-        delete _video;
-    if(_net_device != 0)
-        delete _net_device;
+    delete _video;
+    delete _net_device;
     delete _radio_protocol;
     delete _voice_led_timer;
     delete _data_led_timer;
@@ -159,9 +164,10 @@ RadioOp::~RadioOp()
     delete _voip_encode_buffer;
     _m_queue->clear();
     delete _m_queue;
+    delete _relay_controller;
 }
 
-void RadioOp::stop()
+void RadioController::stop()
 {
     if(_rx_inited)
         toggleRX(false);
@@ -170,10 +176,116 @@ void RadioOp::stop()
     _stop=true;
 }
 
-void RadioOp::readConfig(std::string &rx_device_args, std::string &tx_device_args,
+void RadioController::run()
+{
+
+    bool ptt_activated = false;
+    bool data_to_process = false;
+    bool frame_flag = true;
+    int last_ping_time = 0;
+    int last_channel_broadcast_time = 0;
+    while(!_stop)
+    {
+        _mutex->lock();
+        bool transmitting = _transmitting_audio;
+        bool rx_inited = _rx_inited;
+        bool process_text = _process_text;
+        bool vox_enabled = _vox_enabled;
+        bool voip_forwarding = _voip_forwarding;
+        QString text_out = _text_out;
+        int tx_mode = _tx_mode;
+        bool data_modem_sleeping = _data_modem_sleeping;
+        _mutex->unlock();
+
+        QCoreApplication::processEvents();
+        flushVoipBuffer();
+
+        int time = QDateTime::currentDateTime().toTime_t();
+        if((time - last_ping_time) > 10)
+        {
+            emit pingServer();
+            last_ping_time = time;
+        }
+
+        if((time - last_channel_broadcast_time) > 10)
+        {
+            last_channel_broadcast_time = time;
+            if(voip_forwarding && !transmitting && !ptt_activated)
+            {
+                sendChannels();
+            }
+        }
+
+        updateDataModemReset(transmitting, ptt_activated);
+
+        if(transmitting && !ptt_activated)
+        {
+            ptt_activated = true;
+            startTx();
+        }
+        if(!transmitting && ptt_activated && !data_modem_sleeping)
+        {
+            ptt_activated = false;
+            stopTx();
+        }
+
+        getFFTData();
+        getConstellationData();
+        getRSSI();
+        if(transmitting)
+        {
+            if(tx_mode == gr_modem_types::ModemTypeQPSKVideo)
+                processInputVideoStream(frame_flag);
+            else if(tx_mode == gr_modem_types::ModemTypeQPSK250000)
+            {
+                if(rx_inited)
+                {
+                    _mutex->lock();
+                    _modem->demodulate();
+                    _mutex->unlock();
+                }
+                if(!data_modem_sleeping)
+                    processInputNetStream();
+            }
+        }
+
+        data_to_process = getDemodulatorData();
+
+        if(process_text && (_tx_radio_type == radio_type::RADIO_TYPE_DIGITAL))
+        {
+            sendTextData(text_out, gr_modem::FrameTypeText);
+            emit displayTransmitStatus(false);
+        }
+
+        // FIXME: remove these hardcoded sleeps
+        if(!transmitting && !vox_enabled && !process_text)
+        {
+            if(!data_to_process)
+            {
+                struct timespec time_to_sleep = {0, 5000000L };
+                nanosleep(&time_to_sleep, NULL);
+            }
+            else
+            {
+                struct timespec time_to_sleep = {0, 1000L };
+                nanosleep(&time_to_sleep, NULL);
+            }
+        }
+        else
+        {
+            struct timespec time_to_sleep = {0, 2000000L };
+            nanosleep(&time_to_sleep, NULL);
+        }
+    }
+
+    emit finished();
+}
+
+void RadioController::readConfig(std::string &rx_device_args, std::string &tx_device_args,
                          std::string &rx_antenna, std::string &tx_antenna, int &rx_freq_corr,
                          int &tx_freq_corr, std::string &callsign, std::string &video_device)
 {
+    // to handle user updating device settings at runtime
     _settings->readConfig();
     int tx_power, rx_sensitivity, squelch, rx_volume, bb_gain;
     long long rx_frequency, tx_shift, demod_offset, rx_sample_rate;
@@ -241,12 +353,12 @@ void RadioOp::readConfig(std::string &rx_device_args, std::string &tx_device_arg
     }
     if(_rx_volume == 0)
     {
-        _rx_volume = (float)rx_volume/50.0;
+        _rx_volume = 1e-3*exp(((float)rx_volume/100.0)*6.908);
     }
 
 }
 
-void RadioOp::updateInputAudioStream()
+void RadioController::updateInputAudioStream()
 {
     /// this code runs only in startTx and stopTx
     if(!_transmitting_audio && !_vox_enabled)
@@ -263,14 +375,46 @@ void RadioOp::updateInputAudioStream()
     if((_tx_mode == gr_modem_types::ModemTypeBPSK2000) ||
             (_tx_mode == gr_modem_types::ModemType2FSK2000) ||
             (_tx_mode == gr_modem_types::ModemType4FSK2000) ||
-            (_tx_mode == gr_modem_types::ModemTypeQPSK2000))
+            (_tx_mode == gr_modem_types::ModemTypeQPSK2000) ||
+            (_tx_mode == gr_modem_types::ModemTypeBPSK1000))
+    {
         audio_mode = AudioInterface::AUDIO_MODE_CODEC2;
-    else
+        emit setAudioReadMode(true, true, audio_mode);
+    }
+    else if((_tx_mode == gr_modem_types::ModemTypeQPSK20000) ||
+            (_tx_mode == gr_modem_types::ModemType2FSK20000) ||
+            (_tx_mode == gr_modem_types::ModemType4FSK20000))
+    {
         audio_mode = AudioInterface::AUDIO_MODE_OPUS;
-    emit setAudioReadMode(true, true, audio_mode);
+        emit setAudioReadMode(true, true, audio_mode);
+    }
+    else
+    {
+        audio_mode = AudioInterface::AUDIO_MODE_ANALOG;
+        emit setAudioReadMode(true, false, audio_mode);
+    }
 }
 
-void RadioOp::txAudio(short *audiobuffer, int audiobuffer_size, int vad, bool radio_only)
+void RadioController::flushVoipBuffer()
+{
+    // FIXME: breakups on official Mumble client
+
+    if(_voip_encode_buffer->size() >= 320)
+    {
+
+        short *pcm = new short[320];
+        for(int i =0; i< 320;i++)
+        {
+            pcm[i] = _voip_encode_buffer->at(i);
+        }
+
+        emit voipDataPCM(pcm,320*sizeof(short));
+        _voip_encode_buffer->remove(0,320);
+    }
+
+}
+
+void RadioController::txAudio(short *audiobuffer, int audiobuffer_size, int vad, bool radio_only)
 {
     /// first check the other places we need to send it
     if(_vox_enabled)
@@ -336,7 +480,7 @@ void RadioOp::txAudio(short *audiobuffer, int audiobuffer_size, int vad, bool ra
     delete[] audiobuffer;
 }
 
-int RadioOp::processInputVideoStream(bool &frame_flag)
+int RadioController::processInputVideoStream(bool &frame_flag)
 {
     unsigned int max_video_frame_size = 3122;
     unsigned long encoded_size;
@@ -380,7 +524,7 @@ int RadioOp::processInputVideoStream(bool &frame_flag)
     return 1;
 }
 
-void RadioOp::processInputNetStream()
+void RadioController::processInputNetStream()
 {
     // 48400
     qint64 time_per_frame = 48400000;
@@ -433,7 +577,7 @@ void RadioOp::processInputNetStream()
     }
 }
 
-void RadioOp::sendTextData(QString text, int frame_type)
+void RadioController::sendTextData(QString text, int frame_type)
 {
     if(_tx_inited)
     {
@@ -459,7 +603,7 @@ void RadioOp::sendTextData(QString text, int frame_type)
     }
 }
 
-void RadioOp::sendBinData(QByteArray data, int frame_type)
+void RadioController::sendBinData(QByteArray data, int frame_type)
 {
     if(_tx_inited)
     {
@@ -483,7 +627,7 @@ void RadioOp::sendBinData(QByteArray data, int frame_type)
     }
 }
 
-void RadioOp::sendEndBeep()
+void RadioController::sendEndBeep()
 {
     short *samples = (short*) _end_rec_sound->data();
     std::vector<float> *pcm = new std::vector<float>;
@@ -496,13 +640,58 @@ void RadioOp::sendEndBeep()
     emit pcmData(pcm);
 }
 
-void RadioOp::sendChannels()
+void RadioController::sendChannels()
 {
     QByteArray data = _radio_protocol->buildRepeaterInfo();
     sendBinData(data,gr_modem::FrameTypeRepeaterInfo);
 }
 
-void RadioOp::startTx()
+void RadioController::setRelays(bool transmitting)
+{
+    int res;
+    struct timespec time_to_sleep;
+    if(transmitting)
+    {
+        res = _relay_controller->enableRelay(0);
+        if(!res)
+        {
+            std::cerr << "Relay control failed, stopping to avoid damage" << std::endl;
+            exit(EXIT_FAILURE);
+        }
+        time_to_sleep = {0, 10000L };
+        nanosleep(&time_to_sleep, NULL);
+        res = _relay_controller->enableRelay(1);
+        if(!res)
+        {
+            std::cerr << "Relay control failed, stopping to avoid damage" << std::endl;
+            exit(EXIT_FAILURE);
+        }
+        time_to_sleep = {0, 10000L };
+        nanosleep(&time_to_sleep, NULL);
+    }
+    else
+    {
+        res = _relay_controller->disableRelay(0);
+        if(!res)
+        {
+            std::cerr << "Relay control failed, stopping to avoid damage" << std::endl;
+            exit(EXIT_FAILURE);
+        }
+        time_to_sleep = {0, 10000L };
+        nanosleep(&time_to_sleep, NULL);
+        res = _relay_controller->disableRelay(1);
+        if(!res)
+        {
+            std::cerr << "Relay control failed, stopping to avoid damage" << std::endl;
+            exit(EXIT_FAILURE);
+        }
+        time_to_sleep = {0, 10000L };
+        nanosleep(&time_to_sleep, NULL);
+    }
+
+}
+
+void RadioController::startTx()
 {
     updateInputAudioStream(); // moved here, LimeSDR specific thing (calibration at low power)
     if(_tx_inited)
@@ -527,6 +716,7 @@ void RadioOp::startTx()
         _modem->tuneTx(_tx_frequency + _tune_shift_freq);
         _modem->setTxPower(_tx_power);
         _mutex->unlock();
+        setRelays(true);
 
         // FIXME: full duplex mode
         //if(_rx_inited && !_repeat && (_rx_mode != gr_modem_types::ModemTypeQPSK250000))
@@ -554,12 +744,13 @@ void RadioOp::startTx()
             _modem->startTransmission(_callsign);
             _mutex->unlock();
         }
+        emit displayTransmitStatus(true);
 
     }
 
 }
 
-void RadioOp::stopTx()
+void RadioController::stopTx()
 {
     updateInputAudioStream();
     if(_tx_inited)
@@ -590,9 +781,10 @@ void RadioOp::stopTx()
     }
 }
 
-void RadioOp::endTx()
+void RadioController::endTx()
 {
     // On LimeSDR mini, when I call setTxPower I get a brief spike of the LO
+    setRelays(false);
     _mutex->lock();
     _modem->setTxPower(0.01);
     _modem->flushSources();
@@ -603,35 +795,16 @@ void RadioOp::endTx()
         _modem->enableDemod(true);
         _modem->setRxSensitivity(_rx_sensitivity);
     }
+    emit displayTransmitStatus(false);
 }
 
-void RadioOp::updateFrequency()
+void RadioController::updateFrequency()
 {
 
 }
 
 
-
-void RadioOp::flushVoipBuffer()
-{
-    // FIXME: breakups on official Mumble client
-
-    if(_voip_encode_buffer->size() >= 320)
-    {
-
-        short *pcm = new short[320];
-        for(int i =0; i< 320;i++)
-        {
-            pcm[i] = _voip_encode_buffer->at(i);
-        }
-
-        emit voipDataPCM(pcm,320*sizeof(short));
-        _voip_encode_buffer->remove(0,320);
-    }
-
-}
-
-void RadioOp::updateDataModemReset(bool transmitting, bool ptt_activated)
+void RadioController::updateDataModemReset(bool transmitting, bool ptt_activated)
 {
     if((_tx_mode == gr_modem_types::ModemTypeQPSK250000) && !_data_modem_sleeping
             && transmitting && ptt_activated)
@@ -662,7 +835,7 @@ void RadioOp::updateDataModemReset(bool transmitting, bool ptt_activated)
     }
 }
 
-bool RadioOp::getDemodulatorData()
+bool RadioController::getDemodulatorData()
 {
     bool data_to_process = false;
     if(_rx_inited)
@@ -674,118 +847,16 @@ bool RadioOp::getDemodulatorData()
             data_to_process = _modem->demodulateAnalog();
         }
 
-        if(!_tuning_done)
+        if(!_scan_done)
             scan(data_to_process);
+        if(!_memory_scan_done)
+            memoryScan(data_to_process);
     }
     return data_to_process;
 }
 
-void RadioOp::run()
-{
 
-    bool ptt_activated = false;
-    bool data_to_process = false;
-    bool frame_flag = true;
-    int last_ping_time = 0;
-    int last_channel_broadcast_time = 0;
-    while(!_stop)
-    {
-        _mutex->lock();
-        bool transmitting = _transmitting_audio;
-        bool rx_inited = _rx_inited;
-        bool process_text = _process_text;
-        bool vox_enabled = _vox_enabled;
-        bool voip_forwarding = _voip_forwarding;
-        QString text_out = _text_out;
-        int tx_mode = _tx_mode;
-        bool data_modem_sleeping = _data_modem_sleeping;
-        _mutex->unlock();
-
-        QCoreApplication::processEvents();
-        flushVoipBuffer();
-
-        int time = QDateTime::currentDateTime().toTime_t();
-        if((time - last_ping_time) > 10)
-        {
-            emit pingServer();
-            last_ping_time = time;
-        }
-
-        if((time - last_channel_broadcast_time) > 10)
-        {
-            last_channel_broadcast_time = time;
-            if(voip_forwarding && !transmitting && !ptt_activated)
-            {
-                sendChannels();
-            }
-        }
-
-        updateDataModemReset(transmitting, ptt_activated);
-
-        if(transmitting && !ptt_activated)
-        {
-            ptt_activated = true;
-            startTx();
-        }
-        if(!transmitting && ptt_activated && !data_modem_sleeping)
-        {
-            ptt_activated = false;
-            stopTx();
-        }
-
-        getFFTData();
-        getConstellationData();
-        getRSSI();
-        if(transmitting)
-        {
-            if(tx_mode == gr_modem_types::ModemTypeQPSKVideo)
-                processInputVideoStream(frame_flag);
-            else if((tx_mode == gr_modem_types::ModemTypeQPSK250000) && (_net_device != 0))
-            {
-                if(rx_inited)
-                {
-                    _mutex->lock();
-                    _modem->demodulate();
-                    _mutex->unlock();
-                }
-                if(!data_modem_sleeping)
-                    processInputNetStream();
-            }
-        }
-
-        data_to_process = getDemodulatorData();
-
-        if(process_text && (_tx_radio_type == radio_type::RADIO_TYPE_DIGITAL))
-        {
-            sendTextData(text_out, gr_modem::FrameTypeText);
-            emit displayTransmitStatus(false);
-        }
-
-        // FIXME: remove these hardcoded sleeps
-        if(!transmitting && !vox_enabled && !process_text)
-        {
-            if(!data_to_process)
-            {
-                struct timespec time_to_sleep = {0, 5000000L };
-                nanosleep(&time_to_sleep, NULL);
-            }
-            else
-            {
-                struct timespec time_to_sleep = {0, 1000L };
-                nanosleep(&time_to_sleep, NULL);
-            }
-        }
-        else
-        {
-            struct timespec time_to_sleep = {0, 2000000L };
-            nanosleep(&time_to_sleep, NULL);
-        }
-    }
-
-    emit finished();
-}
-
-void RadioOp::getRSSI()
+void RadioController::getRSSI()
 {
     if(!_rssi_enabled)
         return;
@@ -801,7 +872,7 @@ void RadioOp::getRSSI()
     _rssi_read_timer->restart();
 }
 
-void RadioOp::getFFTData()
+void RadioController::getFFTData()
 {
     if(!_fft_enabled)
     {
@@ -823,12 +894,12 @@ void RadioOp::getFFTData()
     }
 }
 
-void RadioOp::setFFTPollTime(int fps)
+void RadioController::setFFTPollTime(int fps)
 {
     _fft_poll_time = (int)(1000 / fps);
 }
 
-void RadioOp::getConstellationData()
+void RadioController::getConstellationData()
 {
     if(!_constellation_enabled)
     {
@@ -849,9 +920,8 @@ void RadioOp::getConstellationData()
 }
 
 
-void RadioOp::receiveDigitalAudio(unsigned char *data, int size)
+void RadioController::receiveDigitalAudio(unsigned char *data, int size)
 {
-    float volume_coeff = 1e-1*exp(_rx_volume*log(10));
     short *audio_out;
     int samples;
     int audio_mode = AudioInterface::AUDIO_MODE_OPUS;
@@ -890,7 +960,7 @@ void RadioOp::receiveDigitalAudio(unsigned char *data, int size)
         }
         for(int i=0;i<samples;i++)
         {
-            audio_out[i] = (short)((float)audio_out[i] * amplif * volume_coeff);
+            audio_out[i] = (short)((float)audio_out[i] * amplif * _rx_volume);
         }
         if(_voip_forwarding && audio_mode!=AudioInterface::AUDIO_MODE_OPUS)
         {
@@ -903,14 +973,13 @@ void RadioOp::receiveDigitalAudio(unsigned char *data, int size)
     }
 }
 
-void RadioOp::receivePCMAudio(std::vector<float> *audio_data)
+void RadioController::receivePCMAudio(std::vector<float> *audio_data)
 {
-    float volume_coeff = 1e-1*exp(_rx_volume*log(10));
     int size = audio_data->size();
     short *pcm = new short[size];
     for(int i=0;i<size;i++)
     {
-        pcm[i] = (short)(audio_data->at(i) * volume_coeff * 32767.0f);
+        pcm[i] = (short)(audio_data->at(i) * _rx_volume * 32767.0f);
         if(_voip_forwarding)
         {
             _voip_encode_buffer->push_back(pcm[i]);
@@ -929,7 +998,7 @@ void RadioOp::receivePCMAudio(std::vector<float> *audio_data)
     audioFrameReceived();
 }
 
-int RadioOp::getFrameLength(unsigned char *data)
+int RadioController::getFrameLength(unsigned char *data)
 {
     int frame_size1;
     int frame_size2;
@@ -948,7 +1017,7 @@ int RadioOp::getFrameLength(unsigned char *data)
         return 0;
 }
 
-unsigned int RadioOp::getFrameCRC32(unsigned char *data)
+unsigned int RadioController::getFrameCRC32(unsigned char *data)
 {
     unsigned int crc1;
     unsigned int crc2;
@@ -967,7 +1036,7 @@ unsigned int RadioOp::getFrameCRC32(unsigned char *data)
         return 0;
 }
 
-void RadioOp::receiveVideoData(unsigned char *data, int size)
+void RadioController::receiveVideoData(unsigned char *data, int size)
 {
     int frame_size = getFrameLength(data);
     unsigned int crc = getFrameCRC32(data);
@@ -1016,7 +1085,7 @@ void RadioOp::receiveVideoData(unsigned char *data, int size)
 
 }
 
-void RadioOp::receiveNetData(unsigned char *data, int size)
+void RadioController::receiveNetData(unsigned char *data, int size)
 {
     int frame_size = getFrameLength(data);
     if(frame_size < 0)
@@ -1049,10 +1118,9 @@ void RadioOp::receiveNetData(unsigned char *data, int size)
     int res = _net_device->write_buffered(net_frame,frame_size);
 }
 
-void RadioOp::processVoipAudioFrame(short *pcm, int samples, quint64 sid)
+void RadioController::processVoipAudioFrame(short *pcm, int samples, quint64 sid)
 {
     // FIXME: refactor refactor refactor
-    float volume_coeff = 1e-1*exp(_rx_volume*log(10));
     if(_m_queue->empty())
     {
         for(int i=0;i<samples;i++)
@@ -1083,7 +1151,7 @@ void RadioOp::processVoipAudioFrame(short *pcm, int samples, quint64 sid)
         short *pcm = new short[_m_queue->size()];
         for(unsigned int i = 0;i<_m_queue->size();i++)
         {
-            pcm[i] = (short)((float)_m_queue->at(i) * volume_coeff);
+            pcm[i] = (short)((float)_m_queue->at(i) * _rx_volume);
         }
         if(_voip_forwarding && _tx_inited)
         {
@@ -1106,18 +1174,20 @@ void RadioOp::processVoipAudioFrame(short *pcm, int samples, quint64 sid)
     }
 }
 
-void RadioOp::startTransmission()
+void RadioController::startTransmission()
 {
+    if(_rx_inited && _rx_sample_rate != 1000000)
+        return;
     if(_tx_inited || _voip_enabled)
         _transmitting_audio = true;
 }
 
-void RadioOp::endTransmission()
+void RadioController::endTransmission()
 {
     _transmitting_audio = false;
 }
 
-void RadioOp::textData(QString text, bool repeat)
+void RadioController::textData(QString text, bool repeat)
 {
     _repeat_text = repeat;
 
@@ -1127,17 +1197,17 @@ void RadioOp::textData(QString text, bool repeat)
 
 }
 
-void RadioOp::textReceived(QString text)
+void RadioController::textReceived(QString text)
 {
     emit printText(text, false);
 }
 
-void RadioOp::repeaterInfoReceived(QByteArray data)
+void RadioController::repeaterInfoReceived(QByteArray data)
 {
     _radio_protocol->dataIn(data);
 }
 
-void RadioOp::callsignReceived(QString callsign)
+void RadioController::callsignReceived(QString callsign)
 {
     QString time= QDateTime::currentDateTime().toString("dd/MMM/yyyy hh:mm:ss");
     QString text = "\n\n<b>" + time + "</b> " + "<font color=\"#FF5555\">" + callsign + " </font><br/>\n";
@@ -1151,13 +1221,13 @@ void RadioOp::callsignReceived(QString callsign)
     emit printCallsign(callsign);
 }
 
-void RadioOp::audioFrameReceived()
+void RadioController::audioFrameReceived()
 {
     emit displayReceiveStatus(true);
     _voice_led_timer->start(500);
 }
 
-void RadioOp::dataFrameReceived()
+void RadioController::dataFrameReceived()
 {
     emit displayDataReceiveStatus(true);
     _data_led_timer->start(500);
@@ -1172,13 +1242,13 @@ void RadioOp::dataFrameReceived()
 
 }
 
-void RadioOp::receiveEnd()
+void RadioController::receiveEnd()
 {
     emit displayReceiveStatus(false);
     emit displayDataReceiveStatus(false);
 }
 
-void RadioOp::endAudioTransmission()
+void RadioController::endAudioTransmission()
 {
     QString time= QDateTime::currentDateTime().toString("d/MMM/yyyy hh:mm:ss");
     emit printText("<b>" + time + "</b> <font color=\"#77FF77\">Transmission end</font><br/>\n",true);
@@ -1188,17 +1258,17 @@ void RadioOp::endAudioTransmission()
     emit writePCM(samples, _end_rec_sound->size(), false, AudioInterface::AUDIO_MODE_ANALOG);
 }
 
-void RadioOp::addChannel(MumbleChannel *chan)
+void RadioController::addChannel(MumbleChannel *chan)
 {
     _radio_protocol->addChannel(chan);
 }
 
-void RadioOp::setStations(StationList list)
+void RadioController::setStations(StationList list)
 {
     _radio_protocol->setStations(list);
 }
 
-void RadioOp::toggleRX(bool value)
+void RadioController::toggleRX(bool value)
 {
 
     if(value)
@@ -1244,19 +1314,10 @@ void RadioOp::toggleRX(bool value)
         _modem->startRX();
         _mutex->unlock();
 
-        if(_rx_mode == gr_modem_types::ModemTypeQPSK250000 && _net_device == 0)
-        {
-            _net_device = new NetDevice(0, _settings->ip_address);
-        }
         _rx_inited = true;
     }
     else if (_rx_inited)
     {
-        if(_rx_mode == gr_modem_types::ModemTypeQPSK250000 && _net_device != 0 && !_tx_inited)
-        {
-            delete _net_device;
-            _net_device = 0;
-        }
         _mutex->lock();
         _modem->stopRX();
         _modem->deinitRX(_rx_mode);
@@ -1266,7 +1327,7 @@ void RadioOp::toggleRX(bool value)
     }
 }
 
-void RadioOp::toggleTX(bool value)
+void RadioController::toggleTX(bool value)
 {
     if(value)
     {
@@ -1298,6 +1359,10 @@ void RadioOp::toggleTX(bool value)
             emit initError("Could not init TX device, check settings");
             return;
         }
+        if(_tx_mode == gr_modem_types::ModemTypeQPSKVideo)
+            _video->init(QString::fromStdString(video_device));
+        else
+            _video->deinit();
 
         _mutex->lock();
         _modem->setTxPower(0.01);
@@ -1309,12 +1374,7 @@ void RadioOp::toggleTX(bool value)
             _modem->startRX();
         _mutex->unlock();
 
-        if(_tx_mode == gr_modem_types::ModemTypeQPSKVideo)
-            _video = new VideoEncoder(QString::fromStdString(video_device));
-        if(_tx_mode == gr_modem_types::ModemTypeQPSK250000 && _net_device == 0)
-        {
-            _net_device = new NetDevice(0, _settings->ip_address);
-        }
+
         _tx_inited = true;
     }
     else if(_tx_inited)
@@ -1324,22 +1384,13 @@ void RadioOp::toggleTX(bool value)
 
         _modem->deinitTX(_tx_mode);
         _mutex->unlock();
+        _video->deinit();
 
-        if(_tx_mode == gr_modem_types::ModemTypeQPSKVideo)
-        {
-            delete _video;
-            _video = 0;
-        }
-        if(_tx_mode == gr_modem_types::ModemTypeQPSK250000 && _net_device != 0 && !_rx_inited)
-        {
-            delete _net_device;
-            _net_device = 0;
-        }
         _tx_inited = false;
     }
 }
 
-void RadioOp::toggleRxMode(int value)
+void RadioController::toggleRxMode(int value)
 {
     if(_rx_inited)
     {
@@ -1400,67 +1451,79 @@ void RadioOp::toggleRxMode(int value)
         break;
     case 7:
         _rx_radio_type = radio_type::RADIO_TYPE_ANALOG;
-        _rx_mode = gr_modem_types::ModemTypeFREEDV1600LSB;
+        _rx_mode = gr_modem_types::ModemTypeFREEDV800XAUSB;
         _step_hz = 5;
         _scan_step_hz = 2500;
         break;
     case 8:
         _rx_radio_type = radio_type::RADIO_TYPE_ANALOG;
-        _rx_mode = gr_modem_types::ModemTypeFREEDV700DLSB;
+        _rx_mode = gr_modem_types::ModemTypeFREEDV1600LSB;
         _step_hz = 5;
         _scan_step_hz = 2500;
         break;
     case 9:
         _rx_radio_type = radio_type::RADIO_TYPE_ANALOG;
+        _rx_mode = gr_modem_types::ModemTypeFREEDV700DLSB;
+        _step_hz = 5;
+        _scan_step_hz = 2500;
+        break;
+    case 10:
+        _rx_radio_type = radio_type::RADIO_TYPE_ANALOG;
+        _rx_mode = gr_modem_types::ModemTypeFREEDV800XALSB;
+        _step_hz = 5;
+        _scan_step_hz = 2500;
+        break;
+    case 11:
+        _rx_radio_type = radio_type::RADIO_TYPE_ANALOG;
         _rx_mode = gr_modem_types::ModemTypeAM5000;
         _step_hz = 10;
         _scan_step_hz = 10000;
         break;
-    case 10:
+    case 12:
         _rx_mode = gr_modem_types::ModemTypeBPSK2000;
         _step_hz = 5;
         _scan_step_hz = 12500;
         break;
-    case 11:
+    case 13:
         _rx_mode = gr_modem_types::ModemTypeBPSK1000;
         _step_hz = 5;
         _scan_step_hz = 6250;
         break;
-    case 12:
+    case 14:
         _rx_mode = gr_modem_types::ModemTypeQPSK2000;
         _step_hz = 5;
         _scan_step_hz = 6250;
         break;
-    case 13:
+    case 15:
         _rx_mode = gr_modem_types::ModemTypeQPSK20000;
         _step_hz = 50;
         _scan_step_hz = 12500 * 2; // FIXME: channelization
         break;
-    case 14:
+    case 16:
         _rx_mode = gr_modem_types::ModemType2FSK2000;
         _step_hz = 10;
         _scan_step_hz = 12500;
         break;
-    case 15:
+    case 17:
         _rx_mode = gr_modem_types::ModemType2FSK20000;
         _step_hz = 500;
         _scan_step_hz = 50000; // FIXME: channelization
         break;
-    case 16:
+    case 18:
         _rx_mode = gr_modem_types::ModemType4FSK2000;
         _step_hz = 5;
         _scan_step_hz = 12500;
         break;
-    case 17:
+    case 19:
         _rx_mode = gr_modem_types::ModemType4FSK20000;
         _step_hz = 500;
         _scan_step_hz = 50000;
         break; 
-    case 18:
+    case 20:
         _rx_mode = gr_modem_types::ModemTypeQPSKVideo;
         _step_hz = 1000;
         break;
-    case 19:
+    case 21:
         _rx_mode = gr_modem_types::ModemTypeQPSK250000;
         _step_hz = 1000;
         _scan_step_hz = 500000;
@@ -1488,7 +1551,7 @@ void RadioOp::toggleRxMode(int value)
 
 }
 
-void RadioOp::toggleTxMode(int value)
+void RadioController::toggleTxMode(int value)
 {
 
     _tx_radio_type = radio_type::RADIO_TYPE_DIGITAL;
@@ -1524,51 +1587,62 @@ void RadioOp::toggleTxMode(int value)
         break;
     case 7:
         _tx_radio_type = radio_type::RADIO_TYPE_ANALOG;
-        _tx_mode = gr_modem_types::ModemTypeFREEDV1600LSB;
+        _tx_mode = gr_modem_types::ModemTypeFREEDV800XAUSB;
         break;
     case 8:
         _tx_radio_type = radio_type::RADIO_TYPE_ANALOG;
-        _tx_mode = gr_modem_types::ModemTypeFREEDV700DLSB;
+        _tx_mode = gr_modem_types::ModemTypeFREEDV1600LSB;
         break;
     case 9:
         _tx_radio_type = radio_type::RADIO_TYPE_ANALOG;
-        _tx_mode = gr_modem_types::ModemTypeAM5000;
+        _tx_mode = gr_modem_types::ModemTypeFREEDV700DLSB;
         break;
     case 10:
-        _tx_mode = gr_modem_types::ModemTypeBPSK2000;
+        _tx_radio_type = radio_type::RADIO_TYPE_ANALOG;
+        _tx_mode = gr_modem_types::ModemTypeFREEDV800XALSB;
         break;
     case 11:
-        _tx_mode = gr_modem_types::ModemTypeBPSK1000;
+        _tx_radio_type = radio_type::RADIO_TYPE_ANALOG;
+        _tx_mode = gr_modem_types::ModemTypeAM5000;
         break;
     case 12:
-        _tx_mode = gr_modem_types::ModemTypeQPSK2000;
+        _tx_mode = gr_modem_types::ModemTypeBPSK2000;
         break;
     case 13:
-        _tx_mode = gr_modem_types::ModemTypeQPSK20000;
+        _tx_mode = gr_modem_types::ModemTypeBPSK1000;
         break;
     case 14:
-        _tx_mode = gr_modem_types::ModemType2FSK2000;
+        _tx_mode = gr_modem_types::ModemTypeQPSK2000;
         break;
     case 15:
-        _tx_mode = gr_modem_types::ModemType2FSK20000;
+        _tx_mode = gr_modem_types::ModemTypeQPSK20000;
         break;
     case 16:
-        _tx_mode = gr_modem_types::ModemType4FSK2000;
+        _tx_mode = gr_modem_types::ModemType2FSK2000;
         break;
     case 17:
-        _tx_mode = gr_modem_types::ModemType4FSK20000;
+        _tx_mode = gr_modem_types::ModemType2FSK20000;
         break;
     case 18:
-        _tx_mode = gr_modem_types::ModemTypeQPSKVideo;
+        _tx_mode = gr_modem_types::ModemType4FSK2000;
         break;
     case 19:
+        _tx_mode = gr_modem_types::ModemType4FSK20000;
+        break;
+    case 20:
+        _tx_mode = gr_modem_types::ModemTypeQPSKVideo;
+        break;
+    case 21:
         _tx_mode = gr_modem_types::ModemTypeQPSK250000;
         break;
     default:
         _tx_mode = gr_modem_types::ModemTypeBPSK2000;
         break;
     }
-
+    if(_tx_mode == gr_modem_types::ModemTypeQPSKVideo)
+        _video->init(_settings->video_device);
+    else
+        _video->deinit();
     _mutex->lock();
     if(_tx_inited)
         _modem->stopTX();
@@ -1579,25 +1653,26 @@ void RadioOp::toggleTxMode(int value)
 
 }
 
-void RadioOp::usePTTForVOIP(bool value)
+void RadioController::usePTTForVOIP(bool value)
 {
     _voip_enabled = value;
 }
 
-void RadioOp::setVOIPForwarding(bool value)
+void RadioController::setVOIPForwarding(bool value)
 {
     _voip_forwarding = value;
 }
 
-void RadioOp::setVox(bool value)
+void RadioController::setVox(bool value)
 {
     _mutex->lock();
     _vox_enabled = value;
     if(_transmitting_audio && !_vox_enabled)
         _transmitting_audio = false;
+    _mutex->unlock();
 }
 
-void RadioOp::toggleRepeat(bool value)
+void RadioController::toggleRepeat(bool value)
 {
     if((_rx_mode != _tx_mode) && value) // no mixed mode repeat
         return;
@@ -1620,14 +1695,14 @@ void RadioOp::toggleRepeat(bool value)
 
 }
 
-void RadioOp::fineTuneFreq(long center_freq)
+void RadioController::fineTuneFreq(long center_freq)
 {
 
     _modem->setCarrierOffset(_carrier_offset + center_freq*_step_hz);
 
 }
 
-void RadioOp::tuneFreq(qint64 center_freq)
+void RadioController::tuneFreq(qint64 center_freq)
 {
     /// _rx_frequency is the source center frequency
     _rx_frequency = center_freq;
@@ -1636,7 +1711,7 @@ void RadioOp::tuneFreq(qint64 center_freq)
 
 }
 
-void RadioOp::tuneTxFreq(qint64 actual_freq)
+void RadioController::tuneTxFreq(qint64 actual_freq)
 {
     _tx_frequency = actual_freq;
     // FIXME: LimeSDR mini tune requests are blocking
@@ -1646,7 +1721,7 @@ void RadioOp::tuneTxFreq(qint64 actual_freq)
 
 }
 
-void RadioOp::setCarrierOffset(qint64 offset)
+void RadioController::setCarrierOffset(qint64 offset)
 {
     _carrier_offset = offset;
 
@@ -1656,7 +1731,7 @@ void RadioOp::setCarrierOffset(qint64 offset)
 }
 
 
-void RadioOp::changeTxShift(qint64 center_freq)
+void RadioController::changeTxShift(qint64 center_freq)
 {
     _tune_shift_freq = center_freq;
     _mutex->lock();
@@ -1664,7 +1739,7 @@ void RadioOp::changeTxShift(qint64 center_freq)
     _mutex->unlock();
 }
 
-void RadioOp::setSquelch(int value)
+void RadioController::setSquelch(int value)
 {
     _squelch = value;
 
@@ -1672,14 +1747,14 @@ void RadioOp::setSquelch(int value)
 
 }
 
-void RadioOp::setRxSensitivity(int value)
+void RadioController::setRxSensitivity(int value)
 {
     _rx_sensitivity = ((double)value)/100.0;
     _modem->setRxSensitivity(_rx_sensitivity);
 
 }
 
-void RadioOp::setTxPower(int dbm)
+void RadioController::setTxPower(int dbm)
 {
     _tx_power = (float)dbm/100.0;
 
@@ -1688,7 +1763,7 @@ void RadioOp::setTxPower(int dbm)
     _mutex->unlock();
 }
 
-void RadioOp::setBbGain(int value)
+void RadioController::setBbGain(int value)
 {
     _bb_gain = value;
 
@@ -1696,7 +1771,7 @@ void RadioOp::setBbGain(int value)
 
 }
 
-void RadioOp::setRxSampleRate(int samp_rate)
+void RadioController::setRxSampleRate(int samp_rate)
 {
     _rx_sample_rate = samp_rate;
     _mutex->lock();
@@ -1705,7 +1780,7 @@ void RadioOp::setRxSampleRate(int samp_rate)
 
 }
 
-void RadioOp::setFFTSize(int size)
+void RadioController::setFFTSize(int size)
 {
 
     _modem->setFFTSize(size);
@@ -1714,12 +1789,12 @@ void RadioOp::setFFTSize(int size)
 
 
 
-void RadioOp::setVolume(int value)
+void RadioController::setVolume(int value)
 {
-    _rx_volume = (float)value/50.0;
+    _rx_volume = 1e-3*exp(((float)value/100.0)*6.908);
 }
 
-void RadioOp::setRxCTCSS(float value)
+void RadioController::setRxCTCSS(float value)
 {
     _rx_ctcss = value;
 
@@ -1727,7 +1802,7 @@ void RadioOp::setRxCTCSS(float value)
 
 }
 
-void RadioOp::setTxCTCSS(float value)
+void RadioController::setTxCTCSS(float value)
 {
     _tx_ctcss = value;
 
@@ -1735,7 +1810,7 @@ void RadioOp::setTxCTCSS(float value)
 
 }
 
-void RadioOp::enableGUIConst(bool value)
+void RadioController::enableGUIConst(bool value)
 {
     _constellation_enabled = value;
 
@@ -1743,7 +1818,7 @@ void RadioOp::enableGUIConst(bool value)
 
 }
 
-void RadioOp::enableRSSI(bool value)
+void RadioController::enableRSSI(bool value)
 {
     _rssi_enabled = value;
 
@@ -1751,7 +1826,7 @@ void RadioOp::enableRSSI(bool value)
 
 }
 
-void RadioOp::enableGUIFFT(bool value)
+void RadioController::enableGUIFFT(bool value)
 {
     _fft_enabled = value;
 
@@ -1759,12 +1834,12 @@ void RadioOp::enableGUIFFT(bool value)
 
 }
 
-void RadioOp::enableDuplex(bool value)
+void RadioController::enableDuplex(bool value)
 {
     _duplex_enabled = value;
 }
 
-void RadioOp::scan(bool receiving, bool wait_for_timer)
+void RadioController::scan(bool receiving, bool wait_for_timer)
 {
     bool increment_main_frequency = false;
     bool decrement_main_frequency = false;
@@ -1787,7 +1862,8 @@ void RadioOp::scan(bool receiving, bool wait_for_timer)
     if(wait_for_timer)
     {
         qint64 msec = (quint64)_scan_timer->nsecsElapsed() / 1000000;
-        if(msec < _fft_poll_time)
+        // Buffers are at least 40 msec, so we need at least twice as much time
+        if(msec < 100)
         {
             return;
         }
@@ -1827,9 +1903,9 @@ void RadioOp::scan(bool receiving, bool wait_for_timer)
     _scan_timer->restart();
 }
 
-void RadioOp::startAutoTune(int step, int direction)
+void RadioController::startScan(int step, int direction)
 {
-    if(!_rx_inited)
+    if(!_rx_inited || !_scan_done || !_memory_scan_done)
         return;
     if(step != 0)
         _scan_step_hz = step;
@@ -1839,14 +1915,88 @@ void RadioOp::startAutoTune(int step, int direction)
     _tune_limit_upper = _rx_sample_rate / 2;
     _autotune_freq = _carrier_offset;
     _scan_timer->start();
-    _tuning_done = false;
+    _scan_done = false;
     scan(false, false);
 }
 
-void RadioOp::stopAutoTune()
+void RadioController::stopScan()
 {
-    _tuning_done = true;
+    _scan_done = true;
     _scan_stop = false;
     _carrier_offset = _autotune_freq;
     emit freqToGUI(_rx_frequency, _autotune_freq);
+}
+
+void RadioController::startMemoryScan(RadioChannels *channels, int direction)
+{
+    _memory_channels = channels->getChannels()->toList();
+    if(!_rx_inited || !_scan_done || !_memory_scan_done || _memory_channels.size() < 1)
+        return;
+
+    if(direction == 0)
+    {
+        std::reverse(_memory_channels.begin(), _memory_channels.end());
+    }
+    _scan_timer->start();
+    _memory_scan_done = false;
+    _memory_scan_index = 0;
+    memoryScan(false, false);
+}
+
+void RadioController::stopMemoryScan()
+{
+    _memory_scan_done = true;
+    _scan_stop = false;
+    emit freqToGUI(_rx_frequency, _carrier_offset);
+}
+
+void RadioController::memoryScan(bool receiving, bool wait_for_timer)
+{
+    if(receiving && !_scan_stop)
+    {
+        _scan_stop = true;
+    }
+    if(_scan_stop)
+    {
+        qint64 msec = (quint64)_scan_timer->nsecsElapsed() / 1000000;
+        if(msec < 5000)
+        {
+            return;
+        }
+        else
+        {
+            _scan_stop = false;
+        }
+    }
+    if(wait_for_timer)
+    {
+        qint64 msec = (quint64)_scan_timer->nsecsElapsed() / 1000000;
+        // Buffers are at least 40 msec, so we need at least twice as much time
+        if(msec < 100) // FIXME: hardcoded
+        {
+            return;
+        }
+    }
+    struct timespec time_to_sleep;
+    radiochannel *chan = _memory_channels.at(_memory_scan_index);
+    _rx_frequency = chan->rx_frequency - _carrier_offset;
+
+    tuneFreq(_rx_frequency);
+    time_to_sleep = {0, 1000L }; // Give PLL time to settle
+    nanosleep(&time_to_sleep, NULL);
+
+    emit freqToGUI(_rx_frequency, _carrier_offset);
+    toggleRxMode(chan->rx_mode);
+
+    _tune_shift_freq = chan->tx_shift;
+    tuneTxFreq(chan->rx_frequency);
+    time_to_sleep = {0, 1000L };
+    nanosleep(&time_to_sleep, NULL);
+
+    toggleTxMode(chan->tx_mode);
+    _memory_scan_index++;
+    if(_memory_scan_index >= _memory_channels.size())
+        _memory_scan_index = 0;
+
+    _scan_timer->restart();
 }

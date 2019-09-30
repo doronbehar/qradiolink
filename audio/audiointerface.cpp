@@ -215,7 +215,7 @@ int AudioInterface::read_short(short *buf, short bufsize, bool preprocess, int a
 
     compress_audio(buf, bufsize, 0, audio_mode);
     float power = calc_audio_power(buf, bufsize/sizeof(short));
-    return (power > 0.001);
+    return (power > 2.0);
 }
 
 float AudioInterface::calc_audio_power(short *buf, short samples)
@@ -242,7 +242,6 @@ void AudioInterface::compress_audio(short *buf, short bufsize, int direction, in
         switch(audio_mode)
         {
         case AUDIO_MODE_ANALOG:
-            break;
         case AUDIO_MODE_OPUS:
             sf_compressor_process(&_cm_state_read, bufsize/sizeof(short), input_snd->samples, output_snd->samples);
             break;
@@ -256,7 +255,6 @@ void AudioInterface::compress_audio(short *buf, short bufsize, int direction, in
         switch(audio_mode)
         {
         case AUDIO_MODE_ANALOG:
-            break;
         case AUDIO_MODE_OPUS:
             sf_compressor_process(&_cm_state_write, bufsize/sizeof(short), input_snd->samples, output_snd->samples);
             break;

@@ -31,7 +31,6 @@
 #include <boost/thread/mutex.hpp>
 #include <boost/circular_buffer.hpp>
 #include <volk/volk.h>
-#include <volk/volk_32fc_s32f_x2_power_spectral_density_32f.h>
 
 
 #define MAX_FFT_SIZE 1048576
@@ -99,7 +98,6 @@ private:
     std::vector<float>  d_window; /*! FFT window taps. */
 
     float *d_fft_points;
-    float *d_shift_buffer;
 
     gr_complex *d_sample_buffer;
 

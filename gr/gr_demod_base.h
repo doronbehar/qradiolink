@@ -35,6 +35,7 @@
 #include <gnuradio/blocks/rotator_cc.h>
 #include <gnuradio/blocks/message_debug.h>
 #include <gnuradio/blocks/probe_signal_f.h>
+#include <gnuradio/constants.h>
 #include <osmosdr/source.h>
 #include <vector>
 #include "gr_audio_sink.h"
@@ -134,8 +135,10 @@ private:
     gr_demod_wbfm_sdr_sptr _wfm;
     gr_demod_freedv_sptr _freedv_rx1600_usb;
     gr_demod_freedv_sptr _freedv_rx700C_usb;
+    gr_demod_freedv_sptr _freedv_rx800XA_usb;
     gr_demod_freedv_sptr _freedv_rx1600_lsb;
     gr_demod_freedv_sptr _freedv_rx700C_lsb;
+    gr_demod_freedv_sptr _freedv_rx800XA_lsb;
 
     osmosdr::source::sptr _osmosdr_source;
 

@@ -182,6 +182,7 @@ private:
     void        makeFrequencyStrs();
     int         xFromFreq(qint64 freq);
     qint64      freqFromX(int x);
+    float dbFromY(int y);
     void        zoomStepX(float factor, int x);
     qint64      roundFreq(qint64 freq, int resolution);
     quint64     msecFromY(int y);
@@ -282,6 +283,7 @@ private:
     int         fft_rate;           // expected FFT rate (needed when WF span is auto)
     QOpenGLContext *m_opengl_context;
     QOpenGLPaintDevice *m_opengl_device;
+    QPoint LineBuf[MAX_SCREENSIZE];
 };
 
 #endif // PLOTTER_H

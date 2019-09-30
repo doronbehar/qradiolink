@@ -25,17 +25,22 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QTreeWidgetItem>
+#include <QTableWidgetItem>
 #include <QGraphicsOpacityEffect>
 #include <QPropertyAnimation>
 #include <QPainter>
-#include "mumbleclient.h"
+#include <QToolTip>
 #include <math.h>
 #include <complex>
-#include "qtgui/freqctrl.h"
 #include <libconfig.h++>
+#include "ext/utils.h"
+#include "mumbleclient.h"
+#include "radiochannel.h"
+#include "qtgui/freqctrl.h"
+#include "qtgui/plotter.h"
 #include "settings.h"
 #include "mumblechannel.h"
-#include "qtgui/plotter.h"
+
 #include <iostream>
 
 typedef std::vector<std::complex<float>> complex_vector;
@@ -48,8 +53,8 @@ class MainWindow : public QMainWindow
     Q_OBJECT
 
 public slots:
-    void startTransmissionRequested();
-    void endTransmissionRequested();
+    void startTx();
+    void endTx();
     void connectVOIPRequested();
     void disconnectVOIPRequested();
     void connectedToServer(QString msg);
@@ -81,6 +86,7 @@ public slots:
     void displayImage(QImage img);
     void enterFreq();
     void saveConfig();
+    void updateMemories();
     void mainTabChanged(int value);
     void clearTextArea();
     void updateFreqGUI(long long center_freq, long carrier_offset);
@@ -109,6 +115,12 @@ public slots:
     void setFFTRange(int value);
     void autoSquelch();
     void initError(QString error);
+    void showMemoriesPanel(bool show);
+    void addMemoryChannel();
+    void removeMemoryChannel();
+    void tuneToMemoryChannel(int row, int col);
+    void editMemoryChannel(QTableWidgetItem* item);
+    void startMemoryScan(bool value);
 
 
 signals:
@@ -136,6 +148,8 @@ signals:
     void enableRSSI(bool value);
     void startAutoTuneFreq(int step, int scan_direction);
     void stopAutoTuneFreq();
+    void startMemoryTune(RadioChannels* channels, int scan_direction);
+    void stopMemoryTune();
     void usePTTForVOIP(bool value);
     void setVOIPForwarding(bool value);
     void setVox(bool value);
@@ -152,50 +166,57 @@ signals:
 
 
 public:
-    explicit MainWindow(Settings *settings, QWidget *parent = 0);
+    explicit MainWindow(Settings *settings, RadioChannels *radio_channels, QWidget *parent = 0);
     ~MainWindow();
 
     void readConfig();
     void initSettings();
+
 private:
-    Ui::MainWindow *ui;
-    bool _transmitting_radio;
-    QPixmap *_video_img;
-    QPixmap *_constellation_img;
-    QFileInfo *_config_file;
-    qint64 _rx_frequency;
-    qint64 _tx_frequency;
-    qint64 _tx_shift_frequency;
-    QFileInfo *setupConfig();
+    void addDisplayChannel(radiochannel *chan, int r);
     void closeEvent(QCloseEvent *);
     void changeEvent(QEvent *);
     void resizeEvent(QResizeEvent *);
-    Settings *_settings;
-    int _current_voip_channel;
-    float *_realFftData;
-    float *_pwrFftData;
-    float *_iirFftData;
-    float _fft_averaging;
-    int _waterfall_fps;
-    long _rx_sample_rate;
-    qint64 _demod_offset;
+    QFileInfo *setupConfig();
     void setFilterWidth(int index);
-    std::vector<std::complex<int>> *_filter_widths;
-    float _rssi;
+
+    // FIXME: inflation of members
+    Ui::MainWindow *ui;
+    Settings *_settings;
+    RadioChannels *_radio_channels;
+    QPixmap *_video_img;
+    QPixmap *_constellation_img;
+    QFileInfo *_config_file;
     QPainter *_constellation_painter;
-    bool _range_set;
+    QPixmap *_s_meter_bg;
     QGraphicsOpacityEffect *_eff_freq;
     QGraphicsOpacityEffect *_eff_const;
     QGraphicsOpacityEffect *_eff_video;
     QGraphicsOpacityEffect *_eff_text_display;
-    QPixmap *_s_meter_bg;
+    std::vector<std::complex<int>> *_filter_widths;
+    float *_realFftData;
+    float *_iirFftData;
+
+    StationList _user_list;
+    bool _transmitting_radio;
+    qint64 _rx_frequency;
+    qint64 _tx_frequency;
+    qint64 _tx_shift_frequency;
+    int _rx_mode;
+    int _tx_mode;
+    int _current_voip_channel;
+
+    float _fft_averaging;
+    int _waterfall_fps;
+    long _rx_sample_rate;
+    qint64 _demod_offset;
+    float _rssi;
+    bool _range_set;
     QTimer _secondary_text_timer;
     QTimer _video_timer;
     QTimer _speech_icon_timer;
     QMutex _mutex;
-    StationList _user_list;
-
-
+    int _new_mem_index;
 
 };
 

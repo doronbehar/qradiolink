@@ -1,4 +1,5 @@
 // Written by Adrian Musceac YO8RZZ , started March 2016.
+// Code is based on examples from libjpeg-turbo
 //
 // This program is free software; you can redistribute it and/or
 // modify it under the terms of the GNU General Public License as
@@ -20,20 +21,36 @@
 #include <setjmp.h>
 
 
-VideoEncoder::VideoEncoder(QString device_name)
+VideoEncoder::VideoEncoder()
 {
+    _init = false;
+}
+
+VideoEncoder::~VideoEncoder()
+{
+    deinit();
+}
+
+void VideoEncoder::init(QString device_name)
+{
+    if(_init)
+        return;
     dev_name = (char*)(device_name.toStdString().c_str());
     std::cerr << "Using video device: " << dev_name << std::endl;
     open_device();
     init_device();
     start_capturing();
+    _init = true;
 }
 
-VideoEncoder::~VideoEncoder()
+void VideoEncoder::deinit()
 {
+    if(!_init)
+        return;
     stop_capturing();
     uninit_device();
     close_device();
+    _init = false;
 }
 
 void VideoEncoder::encode_jpeg(unsigned char *videobuffer, unsigned long &encoded_size, int max_video_frame_size)

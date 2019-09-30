@@ -22,6 +22,7 @@
 #include <gnuradio/top_block.h>
 #include <gnuradio/blocks/rotator_cc.h>
 #include <gnuradio/vocoder/freedv_api.h>
+#include <gnuradio/constants.h>
 #include <osmosdr/sink.h>
 #include <vector>
 #include "gr_vector_source.h"
@@ -81,6 +82,8 @@ private:
     gr_mod_freedv_sdr_sptr _freedv_tx700C_usb;
     gr_mod_freedv_sdr_sptr _freedv_tx1600_lsb;
     gr_mod_freedv_sdr_sptr _freedv_tx700C_lsb;
+    gr_mod_freedv_sdr_sptr _freedv_tx800XA_usb;
+    gr_mod_freedv_sdr_sptr _freedv_tx800XA_lsb;
 
     int _samples_per_symbol;
     int _samp_rate;
