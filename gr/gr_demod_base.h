@@ -18,6 +18,9 @@
 #define GR_DEMOD_BASE_H
 
 #include <QObject>
+#include <QMap>
+#include <QVector>
+#include <string>
 #include <gnuradio/top_block.h>
 #include <gnuradio/filter/firdes.h>
 #include <gnuradio/filter/rational_resampler_base_ccf.h>
@@ -64,6 +67,7 @@ public:
     ~gr_demod_base();
 
     void set_bandwidth_specific();
+
 signals:
 
 public slots:
@@ -72,11 +76,13 @@ public slots:
     std::vector<unsigned char> *getData();
     std::vector<unsigned char> *getData(int nr);
     std::vector<float> *getAudio();
-    void getFFTData(float *fft_data,  unsigned int &fftSize);
+    void get_FFT_data(float *fft_data,  unsigned int &fftSize);
     void tune(long center_freq);
     void set_carrier_offset(long carrier_offset);
-    void set_rx_sensitivity(double value);
+    void set_rx_sensitivity(double value, std::string gain_stage="");
     void set_squelch(int value);
+    void set_agc_attack(float value);
+    void set_agc_decay(float value);
     void set_ctcss(float value);
     void enable_gui_const(bool value);
     void enable_gui_fft(bool value);
@@ -88,13 +94,15 @@ public slots:
     float get_rssi();
     std::vector<gr_complex> *get_constellation_data();
     void set_samp_rate(int samp_rate);
+    void set_filter_width(int filter_width, int mode);
+    void calibrate_rssi(float value);
+    const QMap<std::string,QVector<int>> get_gain_names() const;
 
 private:
     gr::top_block_sptr _top_block;
     gr_audio_sink_sptr _audio_sink;
     gr_vector_sink_sptr _vector_sink;
     rx_fft_c_sptr _fft_sink;
-    gr::analog::agc2_ff::sptr _agc2;
     gr::blocks::message_debug::sptr _message_sink;
     gr::blocks::copy::sptr _rssi_valve;
     gr::blocks::copy::sptr _const_valve;
@@ -117,7 +125,8 @@ private:
     gr_deframer_bb_sptr _deframer1_10k;
     gr_deframer_bb_sptr _deframer2_10k;
 
-    gr_demod_2fsk_sdr_sptr _2fsk;
+    gr_demod_2fsk_sdr_sptr _2fsk_2k;
+    gr_demod_2fsk_sdr_sptr _2fsk_1k;
     gr_demod_2fsk_sdr_sptr _2fsk_10k;
     gr_demod_4fsk_sdr_sptr _4fsk_2k;
     gr_demod_4fsk_sdr_sptr _4fsk_10k;

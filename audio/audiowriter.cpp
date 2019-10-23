@@ -17,11 +17,12 @@
 
 #include "audiowriter.h"
 
-AudioWriter::AudioWriter(QObject *parent) :
+AudioWriter::AudioWriter(const Settings *settings, Logger *logger, QObject *parent) :
     QObject(parent)
 {
-
-    _rx_sample_queue = new std::vector<audio_samples*>;
+    _settings = settings;
+    _logger = logger;
+    _rx_sample_queue = new QVector<audio_samples*>;
     _working = true;
 }
 
@@ -53,11 +54,41 @@ void AudioWriter::writePCM(short *pcm, int bytes, bool preprocess, int audio_mod
 
 void AudioWriter::run()
 {
-    _audio_writer = new AudioInterface;
+    // FIXME: support different frame durations
+    AudioProcessor *processor = new AudioProcessor;
+    QAudioFormat format;
+    format.setSampleRate(8000);
+    format.setChannelCount(1);
+    format.setSampleSize(16);
+    format.setCodec("audio/pcm");
+    format.setByteOrder(QAudioFormat::LittleEndian);
+    format.setSampleType(QAudioFormat::SignedInt);
+
+    QAudioDeviceInfo device = QAudioDeviceInfo::defaultOutputDevice();
+    QList<QAudioDeviceInfo> devices = QAudioDeviceInfo::availableDevices(QAudio::AudioOutput);
+    for(int i = 0;i<devices.size();i++)
+    {
+        if(_settings->audio_output_device == devices.at(i).deviceName())
+        {
+            device = devices.at(i);
+            break;
+        }
+    }
+    if (!device.isFormatSupported(format)) {
+       _logger->log(Logger::LogLevelCritical, "Raw audio format not supported by backend, cannot play audio.");
+       return;
+    }
+
+    QAudioOutput *audio_writer = new QAudioOutput(device, format, this);
+    audio_writer->setBufferSize(4096);
+    QIODevice *audio_dev = audio_writer->start();
+
     while(_working)
     {
         QCoreApplication::processEvents();
+        _mutex.lock();
         int size = _rx_sample_queue->size();
+        _mutex.unlock();
         if(size > 0)
         {
             for(int i=0;i< size;i++)
@@ -70,19 +101,21 @@ void AudioWriter::run()
                 memcpy(pcm, samp->pcm, samp->bytes);
                 delete[] samp->pcm;
                 delete samp;
-                _audio_writer->write_short(pcm, bytes, preprocess, audio_mode);
-
+                processor->write_preprocess(pcm, bytes, preprocess, audio_mode);
+                audio_dev->write((char*)pcm, bytes);
             }
             _mutex.lock();
-            _rx_sample_queue->clear();
+            _rx_sample_queue->remove(0, size);
             _mutex.unlock();
 
         }
         else
         {
-            struct timespec time_to_sleep = {0, 5000000L };
+            struct timespec time_to_sleep = {0, 35000000L };
             nanosleep(&time_to_sleep, NULL);
         }
     }
-    delete _audio_writer;
+    audio_writer->stop();
+    delete audio_writer;
+    delete processor;
 }

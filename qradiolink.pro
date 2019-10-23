@@ -4,19 +4,24 @@
 #
 #-------------------------------------------------
 
-QT       += core gui network sql
+QT       += core gui network multimedia
 
 greaterThan(QT_MAJOR_VERSION, 4): QT += widgets opengl
 
 TARGET = qradiolink
 TEMPLATE = app
 
-CONFIG  += qt thread
+CONFIG  += qt thread qtaudio
+
+#QMAKE_CXXFLAGS += -Werror
+QMAKE_CXXFLAGS += $$(CXXFLAGS)
+QMAKE_CFLAGS += $$(CFLAGS)
+QMAKE_LFLAGS += $$(LDFLAGS)
 
 message($$QMAKESPEC)
 
 linux-g++ {
-    message(GNU/Linux)
+    message(Building for GNU/Linux)
 }
 
 CONFIG(opengl) {
@@ -26,38 +31,41 @@ CONFIG(opengl) {
     message(Building without OpenGL support)
 }
 
-CONFIG(alsa) {
-    message(Building with Alsa support.)
-    DEFINES += USE_ALSA
+CONFIG(qtaudio) {
+    message(Building with Qt audio support.)
+    DEFINES += USE_QT_AUDIO
+    SOURCES += video/imagecapture.cpp
+    HEADERS += video/imagecapture.h
 } else {
-    message(Building without Alsa support)
+    message(Building without Qt audio support)
+    SOURCES += audio/audiointerface.cpp
+    HEADERS += audio/audiointerface.h
+    LIBS += -lpulse-simple -lpulse
 }
 
-#QMAKE_CXXFLAGS += -Werror
-QMAKE_CXXFLAGS += $$(CXXFLAGS)
-QMAKE_CFLAGS += $$(CFLAGS)
-QMAKE_LFLAGS += $$(LDFLAGS)
 
 SOURCES += main.cpp\
         mainwindow.cpp\
         audio/audioencoder.cpp\
-        audio/audiointerface.cpp\
-        dtmfdecoder.cpp\
-        databaseapi.cpp\
+        audio/audioprocessor.cpp \
+        video/videoencoder.cpp \
+        video/videocapture.cpp \
         mumbleclient.cpp\
         radioprotocol.cpp \
-        audiowriter.cpp \
-        audioreader.cpp \
+        audio/audiowriter.cpp \
+        audio/audioreader.cpp \
         mumblechannel.cpp \
         radiochannel.cpp \
         relaycontroller.cpp \
         radiocontroller.cpp \
-        server.cpp\
+        commandprocessor.cpp \
+        telnetserver.cpp \
         settings.cpp\
         sslclient.cpp\
         station.cpp\
+        logger.cpp \
+        audio/audiomixer.cpp \
         telnetclient.cpp\
-        telnetserver.cpp\
         ext/Mumble.pb.cc\
         ext/QRadioLink.pb.cc\
         ext/utils.cpp\
@@ -65,9 +73,6 @@ SOURCES += main.cpp\
         ext/compressor.c \
         ext/snd.c \
         ext/mem.c \
-        audio/alsaaudio.cpp \
-        video/videocapture.cpp \
-        video/videoencoder.cpp \
         net/netdevice.cpp \
     qtgui/freqctrl.cpp \
     qtgui/plotter.cpp \
@@ -101,27 +106,30 @@ SOURCES += main.cpp\
     gr/rx_fft.cpp
 
 
+
+
+
 HEADERS  += mainwindow.h\
         audio/audioencoder.h\
-        audio/audiointerface.h\
+        audio/audioprocessor.h \
+        video/videoencoder.h \
         radioprotocol.h \
-        audiowriter.h \
-        audioreader.h \
+        audio/audiowriter.h \
+        audio/audioreader.h \
         mumblechannel.h \
         radiochannel.h \
         relaycontroller.h \
-        dtmfdecoder.h\
-        databaseapi.h\
+        commandprocessor.h \
         mumbleclient.h\
-        server.h\
+        telnetserver.h \
         settings.h\
         sslclient.h\
         station.h\
         telnetclient.h\
-        telnetserver.h\
+        logger.h \
+        audio/audiomixer.h \
         config_defines.h\
         ext/dec.h\
-        ext/Goertzel.h\
         ext/Mumble.pb.h\
         ext/PacketDataStream.h\
         ext/QRadioLink.pb.h\
@@ -130,10 +138,8 @@ HEADERS  += mainwindow.h\
         ext/snd.h \
         ext/mem.h \
         ext/compressor.h \
-        video/videoencoder.h \
         net/netdevice.h \
         radiocontroller.h \
-        audio/alsaaudio.h \
     qtgui/freqctrl.h \
     qtgui/plotter.h \
     gr/gr_modem.h \
@@ -167,21 +173,33 @@ HEADERS  += mainwindow.h\
     gr/modem_types.h
 
 
+!isEmpty(LIBDIR) {
+    LIBS += -L$$LIBDIR
+}
+!isEmpty(INCDIR) {
+    INCLUDEPATH += $$INCDIR
+}
+
+
 #CONFIG += link_pkgconfig
 #PKGCONFIG += gnuradio
 
 FORMS    += mainwindow.ui
 
 
-LIBS += -lgnuradio-pmt -lgnuradio-audio -lgnuradio-analog -lgnuradio-blocks -lgnuradio-fft -lgnuradio-vocoder \
+LIBS += -lgnuradio-pmt -lgnuradio-analog -lgnuradio-fft -lgnuradio-vocoder \
         -lgnuradio-osmosdr -lvolk \
         -lgnuradio-blocks -lgnuradio-filter -lgnuradio-digital -lgnuradio-runtime -lgnuradio-fec \
-        -lboost_thread$$BOOST_SUFFIX -lboost_system$$BOOST_SUFFIX -lboost_program_options$$BOOST_SUFFIX
+        -lboost_system$$BOOST_SUFFIX
 LIBS += -lrt  # need to include on some distros
+LIBS += -lprotobuf -lopus -lcodec2 -ljpeg -lconfig++ -lspeexdsp -lftdi
 
-LIBS += -lprotobuf -lopus -lpulse-simple -lpulse -lcodec2 -lasound -ljpeg -lconfig++ -lspeexdsp -lftdi
-                    #-lFestival -lestbase -leststring -lestools
-#INCLUDEPATH += /usr/include/speech_tools
 
 
 RESOURCES += resources.qrc
+
+!isEmpty(INSTALL_PREFIX) {
+    target.path = $$INSTALL_PREFIX
+    INSTALLS += target
+}
+

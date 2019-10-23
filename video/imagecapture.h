@@ -1,4 +1,4 @@
-// Written by Adrian Musceac YO8RZZ , started October 2013.
+// Written by Adrian Musceac YO8RZZ , started March 2016.
 //
 // This program is free software; you can redistribute it and/or
 // modify it under the terms of the GNU General Public License as
@@ -14,35 +14,35 @@
 // along with this program; if not, write to the Free Software
 // Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
-#ifndef DATABASEAPI_H
-#define DATABASEAPI_H
+#ifndef IMAGECAPTURE_H
+#define IMAGECAPTURE_H
 
-#include <QtSql>
-#include <QVector>
-#include <QString>
-#include <math.h>
-#include "station.h"
-#include "server.h"
+#include <QObject>
+#include <QCamera>
+#include <QCameraInfo>
+#include <QCameraImageCapture>
 #include "settings.h"
 
-class DatabaseApi
+class ImageCapture : public QObject
 {
+    Q_OBJECT
 public:
-    DatabaseApi();
-    ~DatabaseApi();
-    Station* get_station_by_radio_id(QString radio_id);
-    Station* get_station_by_id(int id);
-    Station* get_local_station();
-    void update_station_parameters(Station *s);
-    QVector<Server*> get_servers(int active = 1);
-    Server* get_server_by_id(int id);
-    Settings* get_settings();
-    void clear_stations();
-    void insert_station(Station s);
-    QVector<Station> get_stations(int active=1);
+    explicit ImageCapture(Settings *settings, QObject *parent = nullptr);
+    ~ImageCapture();
+
+    void init();
+    void deinit();
+    void capture_image(unsigned char *frame, int &len);
+
+signals:
+
+public slots:
+    void process_image();
 
 private:
-    QSqlDatabase _db;
+    Settings *_settings;
+    QCamera *_camera;
+    QCameraImageCapture *_capture;
 };
 
-#endif // DATABASEAPI_H
+#endif // IMAGECAPTURE_H

@@ -43,14 +43,12 @@ gr_demod_base::gr_demod_base(QObject *parent, float device_frequency,
     _constellation = make_gr_const_sink();
     _const_valve = gr::blocks::copy::make(8);
     _const_valve->set_enabled(false);
-    // FIXME: this block is using CPU just because I'm lazy
     _demod_valve = gr::blocks::copy::make(8);
     _demod_valve->set_enabled(true);
     _mag_squared = gr::blocks::complex_to_mag_squared::make();
     _single_pole_filter = gr::filter::single_pole_iir_filter_ff::make(0.04);
     _log10 = gr::blocks::nlog10_ff::make();
     _multiply_const_ff = gr::blocks::multiply_const_ff::make(10);
-    _agc2 = gr::analog::agc2_ff::make(100, 100, 1, 1);
     _moving_average = gr::blocks::moving_average_ff::make(2000,1,2000);
     _add_const = gr::blocks::add_const_ff::make(-80);
     _rotator = gr::blocks::rotator_cc::make(2*M_PI/1000000);
@@ -79,7 +77,8 @@ gr_demod_base::gr_demod_base(QObject *parent, float device_frequency,
     _gain_names = _osmosdr_source->get_gain_names();
     if (!_gain_range.empty())
     {
-        double gain =  (double)_gain_range.start() + rf_gain*((double)_gain_range.stop()- (double)_gain_range.start());
+        double gain =  (double)_gain_range.start() + rf_gain*(
+                    (double)_gain_range.stop()- (double)_gain_range.start());
         _osmosdr_source->set_gain_mode(false);
         if(_gain_names.size() == 1)
         {
@@ -123,44 +122,69 @@ gr_demod_base::gr_demod_base(QObject *parent, float device_frequency,
 
 
 
-    _2fsk = make_gr_demod_2fsk_sdr(125,1000000,1700,4000); // 4000 for non FM demod, 2700 for FM
+    _2fsk_2k = make_gr_demod_2fsk_sdr(125,1000000,1700,2700, true); // 4000 for non FM demod, 2700 for FM
+    _2fsk_1k = make_gr_demod_2fsk_sdr(250,1000000,1700,1350, true);
     _2fsk_10k = make_gr_demod_2fsk_sdr(25,1000000,1700,13500, true);
     _4fsk_2k = make_gr_demod_4fsk_sdr(125,1000000,1700,4000);
     _4fsk_10k = make_gr_demod_4fsk_sdr(25,1000000,1700,20000);
-    _am = make_gr_demod_am_sdr(0, 1000000,1700,4000);
+    _am = make_gr_demod_am_sdr(125, 1000000,1700,5000);
     _bpsk_1k = make_gr_demod_bpsk_sdr(250,1000000,1700,1300);
     _bpsk_2k = make_gr_demod_bpsk_sdr(125,1000000,1700,2400);
-    _fm_2500 = make_gr_demod_nbfm_sdr(0, 1000000,1700,2500);
-    _fm_5000 = make_gr_demod_nbfm_sdr(0, 1000000,1700,5000);
+    _fm_2500 = make_gr_demod_nbfm_sdr(125, 1000000,1700,3000);
+    _fm_5000 = make_gr_demod_nbfm_sdr(125, 1000000,1700,6000);
     _qpsk_2k = make_gr_demod_qpsk_sdr(125,1000000,1700,1300);
     _qpsk_10k = make_gr_demod_qpsk_sdr(25,1000000,1700,6500);
     _qpsk_250k = make_gr_demod_qpsk_sdr(2,1000000,1700,160000);
     _qpsk_video = make_gr_demod_qpsk_sdr(2,1000000,1700,160000);
-    _usb = make_gr_demod_ssb_sdr(0, 1000000,1700,2500);
-    _lsb = make_gr_demod_ssb_sdr(1, 1000000,1700,2500);
-    _wfm = make_gr_demod_wbfm_sdr(0, 1000000,1700,75000);
-    _freedv_rx1600_usb = make_gr_demod_freedv(125, 1000000, 1700, 2500, gr::vocoder::freedv_api::MODE_1600, 0);
+    _usb = make_gr_demod_ssb_sdr(125, 1000000,1700,2700,0);
+    _lsb = make_gr_demod_ssb_sdr(125, 1000000,1700,2700,1);
+    _wfm = make_gr_demod_wbfm_sdr(125, 1000000,1700,75000);
+    _freedv_rx1600_usb = make_gr_demod_freedv(125, 1000000, 1700, 2500, 200,
+                                              gr::vocoder::freedv_api::MODE_1600, 0);
 
     int version = atoi(gr::minor_version().c_str());
     if(version >= 13)
-        _freedv_rx700C_usb = make_gr_demod_freedv(125, 1000000, 1700, 2500, gr::vocoder::freedv_api::MODE_700C, 0);
+        _freedv_rx700C_usb = make_gr_demod_freedv(125, 1000000, 1700, 2300, 600,
+                                                  gr::vocoder::freedv_api::MODE_700C, 0);
     else
-        _freedv_rx700C_usb = make_gr_demod_freedv(125, 1000000, 1700, 2500, gr::vocoder::freedv_api::MODE_700, 0);
-    _freedv_rx800XA_usb = make_gr_demod_freedv(125, 1000000, 1700, 2500, gr::vocoder::freedv_api::MODE_800XA, 0);
+        _freedv_rx700C_usb = make_gr_demod_freedv(125, 1000000, 1700, 2300, 600,
+                                                  gr::vocoder::freedv_api::MODE_700, 0);
+    _freedv_rx800XA_usb = make_gr_demod_freedv(125, 1000000, 1700, 2500, 0,
+                                               gr::vocoder::freedv_api::MODE_800XA, 0);
 
-    _freedv_rx1600_lsb = make_gr_demod_freedv(125, 1000000, 1700, 2500, gr::vocoder::freedv_api::MODE_1600, 1);
+    _freedv_rx1600_lsb = make_gr_demod_freedv(125, 1000000, 1700, 2500,200,
+                                              gr::vocoder::freedv_api::MODE_1600, 1);
 
     if(version >= 13)
-        _freedv_rx700C_lsb = make_gr_demod_freedv(125, 1000000, 1700, 2500, gr::vocoder::freedv_api::MODE_700C, 1);
+        _freedv_rx700C_lsb = make_gr_demod_freedv(125, 1000000, 1700, 2300, 600,
+                                                  gr::vocoder::freedv_api::MODE_700C, 1);
     else
-        _freedv_rx700C_lsb = make_gr_demod_freedv(125, 1000000, 1700, 2500, gr::vocoder::freedv_api::MODE_700, 1);
-    _freedv_rx800XA_lsb = make_gr_demod_freedv(125, 1000000, 1700, 2500, gr::vocoder::freedv_api::MODE_800XA, 1);
+        _freedv_rx700C_lsb = make_gr_demod_freedv(125, 1000000, 1700, 2300, 600,
+                                                  gr::vocoder::freedv_api::MODE_700, 1);
+    _freedv_rx800XA_lsb = make_gr_demod_freedv(125, 1000000, 1700, 2500, 0,
+                                               gr::vocoder::freedv_api::MODE_800XA, 1);
 
 }
 
 gr_demod_base::~gr_demod_base()
 {
     _osmosdr_source.reset();
+}
+
+const QMap<std::string,QVector<int>> gr_demod_base::get_gain_names() const
+{
+    QMap<std::string,QVector<int>> gain_names;
+    for(unsigned int i=0;i<_gain_names.size();i++)
+    {
+        QVector<int> gains;
+        osmosdr::gain_range_t gain_range = _osmosdr_source->get_gain_range(_gain_names.at(i));
+        int gain_min = gain_range.start();
+        int gain_max = gain_range.stop();
+        gains.push_back(gain_min);
+        gains.push_back(gain_max);
+        gain_names[_gain_names.at(i)] = gains;
+    }
+    return gain_names;
 }
 
 void gr_demod_base::set_mode(int mode, bool disconnect, bool connect)
@@ -180,12 +204,20 @@ void gr_demod_base::set_mode(int mode, bool disconnect, bool connect)
         switch(_mode)
         {
         case gr_modem_types::ModemType2FSK2000:
-            _top_block->disconnect(_demod_valve,0,_2fsk,0);
-            _top_block->disconnect(_2fsk,0,_rssi_valve,0);
-            _top_block->disconnect(_2fsk,1,_const_valve,0);
+            _top_block->disconnect(_demod_valve,0,_2fsk_2k,0);
+            _top_block->disconnect(_2fsk_2k,0,_rssi_valve,0);
+            _top_block->disconnect(_2fsk_2k,1,_const_valve,0);
             _top_block->disconnect(_const_valve,0,_constellation,0);
-            _top_block->disconnect(_2fsk,2,_deframer1,0);
-            _top_block->disconnect(_2fsk,3,_deframer2,0);
+            _top_block->disconnect(_2fsk_2k,2,_deframer1,0);
+            _top_block->disconnect(_2fsk_2k,3,_deframer2,0);
+            break;
+        case gr_modem_types::ModemType2FSK1000:
+            _top_block->disconnect(_demod_valve,0,_2fsk_1k,0);
+            _top_block->disconnect(_2fsk_1k,0,_rssi_valve,0);
+            _top_block->disconnect(_2fsk_1k,1,_const_valve,0);
+            _top_block->disconnect(_const_valve,0,_constellation,0);
+            _top_block->disconnect(_2fsk_1k,2,_deframer_700_1,0);
+            _top_block->disconnect(_2fsk_1k,3,_deframer_700_2,0);
             break;
         case gr_modem_types::ModemType2FSK20000:
             _top_block->disconnect(_demod_valve,0,_2fsk_10k,0);
@@ -329,12 +361,20 @@ void gr_demod_base::set_mode(int mode, bool disconnect, bool connect)
         switch(mode)
         {
         case gr_modem_types::ModemType2FSK2000:
-            _top_block->connect(_demod_valve,0,_2fsk,0);
-            _top_block->connect(_2fsk,0,_rssi_valve,0);
-            _top_block->connect(_2fsk,1,_const_valve,0);
+            _top_block->connect(_demod_valve,0,_2fsk_2k,0);
+            _top_block->connect(_2fsk_2k,0,_rssi_valve,0);
+            _top_block->connect(_2fsk_2k,1,_const_valve,0);
             _top_block->connect(_const_valve,0,_constellation,0);
-            _top_block->connect(_2fsk,2,_deframer1,0);
-            _top_block->connect(_2fsk,3,_deframer2,0);
+            _top_block->connect(_2fsk_2k,2,_deframer1,0);
+            _top_block->connect(_2fsk_2k,3,_deframer2,0);
+            break;
+        case gr_modem_types::ModemType2FSK1000:
+            _top_block->connect(_demod_valve,0,_2fsk_1k,0);
+            _top_block->connect(_2fsk_1k,0,_rssi_valve,0);
+            _top_block->connect(_2fsk_1k,1,_const_valve,0);
+            _top_block->connect(_const_valve,0,_constellation,0);
+            _top_block->connect(_2fsk_1k,2,_deframer_700_1,0);
+            _top_block->connect(_2fsk_1k,3,_deframer_700_2,0);
             break;
         case gr_modem_types::ModemType2FSK20000:
             _top_block->connect(_demod_valve,0,_2fsk_10k,0);
@@ -498,16 +538,18 @@ std::vector<unsigned char>* gr_demod_base::getData(int nr)
 {
     if(!_demod_running)
     {
-        std::vector<unsigned char> *dummy = new std::vector<unsigned char>;
-        return dummy;
+        return nullptr;
     }
-    std::vector<unsigned char> *data;
+    std::vector<unsigned char> *data = nullptr;
     if(nr == 1)
     {
         switch(_mode)
         {
         case gr_modem_types::ModemType2FSK2000:
             data = _deframer1->get_data();
+            break;
+        case gr_modem_types::ModemType2FSK1000:
+            data = _deframer_700_1->get_data();
             break;
         case gr_modem_types::ModemType2FSK20000:
             data = _deframer1_10k->get_data();
@@ -526,6 +568,9 @@ std::vector<unsigned char>* gr_demod_base::getData(int nr)
         {
         case gr_modem_types::ModemType2FSK2000:
             data = _deframer2->get_data();
+            break;
+        case gr_modem_types::ModemType2FSK1000:
+            data = _deframer_700_2->get_data();
             break;
         case gr_modem_types::ModemType2FSK20000:
             data = _deframer2_10k->get_data();
@@ -546,8 +591,7 @@ std::vector<unsigned char>* gr_demod_base::getData()
 {
     if(!_demod_running)
     {
-        std::vector<unsigned char> *dummy = new std::vector<unsigned char>;
-        return dummy;
+        return nullptr;
     }
     std::vector<unsigned char> *data = _vector_sink->get_data();
     return data;
@@ -557,14 +601,13 @@ std::vector<float>* gr_demod_base::getAudio()
 {
     if(!_demod_running)
     {
-        std::vector<float> *dummy = new std::vector<float>;
-        return dummy;
+        return nullptr;
     }
     std::vector<float> *data = _audio_sink->get_data();
     return data;
 }
 
-void gr_demod_base::getFFTData(float *fft_data,  unsigned int &fftSize)
+void gr_demod_base::get_FFT_data(float *fft_data,  unsigned int &fftSize)
 {
     if(!_demod_running)
     {
@@ -597,12 +640,13 @@ double gr_demod_base::get_freq()
     }
 }
 
-void gr_demod_base::set_rx_sensitivity(double value)
+void gr_demod_base::set_rx_sensitivity(double value, std::string gain_stage)
 {
-    if (!_gain_range.empty())
+    if (!_gain_range.empty() && (gain_stage.size() < 1))
     {
 
-        double gain =  floor((double)_gain_range.start() + value*((double)_gain_range.stop()- (double)_gain_range.start()));
+        double gain =  floor((double)_gain_range.start() + value*(
+                                 (double)_gain_range.stop()- (double)_gain_range.start()));
         _osmosdr_source->set_gain_mode(false); // Pluto ??!!
         if(_gain_names.size() == 1)
         {
@@ -612,6 +656,11 @@ void gr_demod_base::set_rx_sensitivity(double value)
         {
             _osmosdr_source->set_gain(gain);
         }
+    }
+    else
+    {
+        _osmosdr_source->set_gain_mode(false);
+        _osmosdr_source->set_gain(value, gain_stage);
     }
 }
 
@@ -633,6 +682,36 @@ void gr_demod_base::enable_gui_fft(bool value)
 void gr_demod_base::enable_demodulator(bool value)
 {
     _demod_valve->set_enabled(value);
+}
+
+void gr_demod_base::set_filter_width(int filter_width, int mode)
+{
+
+    switch(mode)
+    {
+    case gr_modem_types::ModemTypeWBFM:
+        _wfm->set_filter_width(filter_width);
+        break;
+    case gr_modem_types::ModemTypeAM5000:
+        _am->set_filter_width(filter_width);
+        break;
+    case gr_modem_types::ModemTypeNBFM2500:
+        _fm_2500->set_filter_width(filter_width);
+        break;
+    case gr_modem_types::ModemTypeNBFM5000:
+        _fm_5000->set_filter_width(filter_width);
+        break;
+    case gr_modem_types::ModemTypeUSB2500:
+        _usb->set_filter_width(filter_width);
+        break;
+    case gr_modem_types::ModemTypeLSB2500:
+        _lsb->set_filter_width(filter_width);
+        break;
+    default:
+        break;
+    }
+
+
 }
 
 void gr_demod_base::set_squelch(int value)
@@ -699,7 +778,7 @@ void gr_demod_base::set_samp_rate(int samp_rate)
         {
             _top_block->disconnect(_rotator,0, _demod_valve,0);
         }
-        catch(std::invalid_argument e)
+        catch(std::invalid_argument &e)
         {
 
         }
@@ -708,14 +787,15 @@ void gr_demod_base::set_samp_rate(int samp_rate)
             _top_block->disconnect(_rotator,0, _resampler,0);
             _top_block->disconnect(_resampler,0, _demod_valve,0);
         }
-        catch(std::invalid_argument e)
+        catch(std::invalid_argument &e)
         {
 
         }
         _resampler.reset();
         std::vector<float> taps;
-        int tw = std::min(_samp_rate/4, 1500000);
-        taps = gr::filter::firdes::low_pass(1, _samp_rate, 480000, 100000, gr::filter::firdes::WIN_BLACKMAN_HARRIS);
+        //int tw = std::min(_samp_rate/4, 1500000);
+        taps = gr::filter::firdes::low_pass(1, _samp_rate, 480000, 100000,
+                                            gr::filter::firdes::WIN_BLACKMAN_HARRIS);
 
         _resampler = gr::filter::rational_resampler_base_ccf::make(1, decimation, taps);
         _resampler->set_thread_priority(75);
@@ -729,7 +809,7 @@ void gr_demod_base::set_samp_rate(int samp_rate)
             _top_block->disconnect(_rotator,0, _resampler,0);
             _top_block->disconnect(_resampler,0, _demod_valve,0);
         }
-        catch(std::invalid_argument e)
+        catch(std::invalid_argument &e)
         {
             _top_block->disconnect(_rotator,0, _demod_valve,0);
         }
@@ -737,7 +817,7 @@ void gr_demod_base::set_samp_rate(int samp_rate)
         {
             _top_block->connect(_rotator,0, _demod_valve,0);
         }
-        catch(std::invalid_argument e)
+        catch(std::invalid_argument &e)
         {
         }
     }
@@ -765,4 +845,21 @@ void gr_demod_base::set_bandwidth_specific()
         _osmo_filter_bw = (double)(std::max(1500000, _samp_rate));
     }
     _osmosdr_source->set_bandwidth(_osmo_filter_bw);
+}
+
+void gr_demod_base::calibrate_rssi(float value)
+{
+    _add_const->set_k(value);
+}
+
+void gr_demod_base::set_agc_attack(float value)
+{
+    _usb->set_agc_attack(value);
+    _lsb->set_agc_attack(value);
+}
+
+void gr_demod_base::set_agc_decay(float value)
+{
+    _usb->set_agc_decay(value);
+    _lsb->set_agc_decay(value);
 }

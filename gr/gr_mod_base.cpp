@@ -44,44 +44,70 @@ gr_mod_base::gr_mod_base(QObject *parent, float device_frequency, float rf_gain,
     _osmosdr_sink->set_center_freq(_device_frequency - _carrier_offset);
     _osmosdr_sink->set_freq_corr(freq_corr);
     _gain_range = _osmosdr_sink->get_gain_range();
+    _gain_names = _osmosdr_sink->get_gain_names();
     if (!_gain_range.empty())
     {
         double gain =  _gain_range.start() + rf_gain*(_gain_range.stop()-_gain_range.start());
         _osmosdr_sink->set_gain(gain);
     }
 
-    _2fsk = make_gr_mod_2fsk_sdr(25, 1000000, 1700, 4000); // 4000 for non FM demod, 2700 for FM demod
+    _2fsk_2k = make_gr_mod_2fsk_sdr(25, 1000000, 1700, 2700, true); // 4000 for non FM demod, 2700 for FM demod
+    _2fsk_1k = make_gr_mod_2fsk_sdr(50, 1000000, 1700, 1350, true);
     _2fsk_10k = make_gr_mod_2fsk_sdr(5, 1000000, 1700, 13500, true);
     _4fsk_2k = make_gr_mod_4fsk_sdr(500, 1000000, 1700, 4000);
     _4fsk_10k = make_gr_mod_4fsk_sdr(100, 1000000, 1700, 20000);
-    _am = make_gr_mod_am_sdr(0,1000000, 1700, 4000);
+    _am = make_gr_mod_am_sdr(125,1000000, 1700, 5000);
     _bpsk_1k = make_gr_mod_bpsk_sdr(50, 1000000, 1700, 1200);
     _bpsk_2k = make_gr_mod_bpsk_sdr(25, 1000000, 1700, 2400);
-    _fm_2500 = make_gr_mod_nbfm_sdr(0, 1000000, 1700, 2500);
-    _fm_5000 = make_gr_mod_nbfm_sdr(0, 1000000, 1700, 5000);
+    _fm_2500 = make_gr_mod_nbfm_sdr(20, 1000000, 1700, 3000);
+    _fm_5000 = make_gr_mod_nbfm_sdr(20, 1000000, 1700, 6000);
     _qpsk_2k = make_gr_mod_qpsk_sdr(500, 1000000, 1700, 1300);
     _qpsk_10k = make_gr_mod_qpsk_sdr(100, 1000000, 1700, 6500);
     _qpsk_250k = make_gr_mod_qpsk_sdr(4, 1000000, 1700, 160000);
     _qpsk_video = make_gr_mod_qpsk_sdr(4, 1000000, 1700, 160000);
-    _usb = make_gr_mod_ssb_sdr(0, 1000000, 1700, 2500);
-    _lsb = make_gr_mod_ssb_sdr(1, 1000000, 1700, 2500);
-    _freedv_tx1600_usb = make_gr_mod_freedv_sdr(125, 1000000, 1700, 2500, gr::vocoder::freedv_api::MODE_1600, 0);
+    _usb = make_gr_mod_ssb_sdr(125, 1000000, 1700, 2700, 0);
+    _lsb = make_gr_mod_ssb_sdr(125, 1000000, 1700, 2700, 1);
+    _freedv_tx1600_usb = make_gr_mod_freedv_sdr(125, 1000000, 1700, 2500, 200,
+                                                gr::vocoder::freedv_api::MODE_1600, 0);
 
     int version = atoi(gr::minor_version().c_str());
     if(version >= 13)
-        _freedv_tx700C_usb = make_gr_mod_freedv_sdr(125, 1000000, 1700, 2500, gr::vocoder::freedv_api::MODE_700C, 0);
+        _freedv_tx700C_usb = make_gr_mod_freedv_sdr(125, 1000000, 1700, 2300, 600,
+                                                    gr::vocoder::freedv_api::MODE_700C, 0);
     else
-        _freedv_tx700C_usb = make_gr_mod_freedv_sdr(125, 1000000, 1700, 2500, gr::vocoder::freedv_api::MODE_700, 0);
-    _freedv_tx800XA_usb = make_gr_mod_freedv_sdr(125, 1000000, 1700, 2500, gr::vocoder::freedv_api::MODE_800XA, 0);
+        _freedv_tx700C_usb = make_gr_mod_freedv_sdr(125, 1000000, 1700, 2300, 600,
+                                                    gr::vocoder::freedv_api::MODE_700, 0);
+    _freedv_tx800XA_usb = make_gr_mod_freedv_sdr(125, 1000000, 1700, 2500, 200,
+                                                 gr::vocoder::freedv_api::MODE_800XA, 0);
 
-    _freedv_tx1600_lsb = make_gr_mod_freedv_sdr(125, 1000000, 1700, 2500, gr::vocoder::freedv_api::MODE_1600, 1);
+    _freedv_tx1600_lsb = make_gr_mod_freedv_sdr(125, 1000000, 1700, 2500, 200,
+                                                gr::vocoder::freedv_api::MODE_1600, 1);
 
     if(version >= 13)
-        _freedv_tx700C_lsb = make_gr_mod_freedv_sdr(125, 1000000, 1700, 2500, gr::vocoder::freedv_api::MODE_700C, 1);
+        _freedv_tx700C_lsb = make_gr_mod_freedv_sdr(125, 1000000, 1700, 2300, 600,
+                                                    gr::vocoder::freedv_api::MODE_700C, 1);
     else
-        _freedv_tx700C_lsb = make_gr_mod_freedv_sdr(125, 1000000, 1700, 2500, gr::vocoder::freedv_api::MODE_700, 1);
-    _freedv_tx800XA_lsb = make_gr_mod_freedv_sdr(125, 1000000, 1700, 2500, gr::vocoder::freedv_api::MODE_800XA, 1);
+        _freedv_tx700C_lsb = make_gr_mod_freedv_sdr(125, 1000000, 1700, 2300, 600,
+                                                    gr::vocoder::freedv_api::MODE_700, 1);
+    _freedv_tx800XA_lsb = make_gr_mod_freedv_sdr(125, 1000000, 1700, 2500, 200,
+                                                 gr::vocoder::freedv_api::MODE_800XA, 1);
 
+}
+
+const QMap<std::string,QVector<int>> gr_mod_base::get_gain_names() const
+{
+    QMap<std::string,QVector<int>> gain_names;
+    for(unsigned int i=0;i<_gain_names.size();i++)
+    {
+        QVector<int> gains;
+        osmosdr::gain_range_t gain_range = _osmosdr_sink->get_gain_range(_gain_names.at(i));
+        int gain_min = gain_range.start();
+        int gain_max = gain_range.stop();
+        gains.push_back(gain_min);
+        gains.push_back(gain_max);
+        gain_names[_gain_names.at(i)] = gains;
+    }
+    return gain_names;
 }
 
 void gr_mod_base::set_mode(int mode)
@@ -93,8 +119,13 @@ void gr_mod_base::set_mode(int mode)
     switch(_mode)
     {
     case gr_modem_types::ModemType2FSK2000:
-        _top_block->disconnect(_vector_source,0,_2fsk,0);
-        _top_block->disconnect(_2fsk,0,_rotator,0);
+        _top_block->disconnect(_vector_source,0,_2fsk_2k,0);
+        _top_block->disconnect(_2fsk_2k,0,_rotator,0);
+        _top_block->disconnect(_rotator,0,_osmosdr_sink,0);
+        break;
+    case gr_modem_types::ModemType2FSK1000:
+        _top_block->disconnect(_vector_source,0,_2fsk_1k,0);
+        _top_block->disconnect(_2fsk_1k,0,_rotator,0);
         _top_block->disconnect(_rotator,0,_osmosdr_sink,0);
         break;
     case gr_modem_types::ModemType2FSK20000:
@@ -210,8 +241,17 @@ void gr_mod_base::set_mode(int mode)
         _rotator->set_phase_inc(2*M_PI*_carrier_offset/1000000);
         _osmosdr_sink->set_center_freq(_device_frequency - _carrier_offset);
         _osmosdr_sink->set_sample_rate(1000000);
-        _top_block->connect(_vector_source,0,_2fsk,0);
-        _top_block->connect(_2fsk,0,_rotator,0);
+        _top_block->connect(_vector_source,0,_2fsk_2k,0);
+        _top_block->connect(_2fsk_2k,0,_rotator,0);
+        _top_block->connect(_rotator,0,_osmosdr_sink,0);
+        break;
+    case gr_modem_types::ModemType2FSK1000:
+        _carrier_offset = 50000;
+        _rotator->set_phase_inc(2*M_PI*_carrier_offset/1000000);
+        _osmosdr_sink->set_center_freq(_device_frequency - _carrier_offset);
+        _osmosdr_sink->set_sample_rate(1000000);
+        _top_block->connect(_vector_source,0,_2fsk_1k,0);
+        _top_block->connect(_2fsk_1k,0,_rotator,0);
         _top_block->connect(_rotator,0,_osmosdr_sink,0);
         break;
     case gr_modem_types::ModemType2FSK20000:
@@ -436,14 +476,17 @@ void gr_mod_base::tune(long center_freq)
     set_bandwidth_specific();
 }
 
-void gr_mod_base::set_power(float dbm)
+void gr_mod_base::set_power(float value, std::string gain_stage)
 {
-    if (!_gain_range.empty())
+    if (!_gain_range.empty() && (gain_stage.size() < 1))
     {
-        _top_block->lock();
-        double gain =  _gain_range.start() + dbm*(_gain_range.stop()-_gain_range.start());
+        double gain =  _gain_range.start() + value*(_gain_range.stop()-_gain_range.start());
         _osmosdr_sink->set_gain(gain);
-        _top_block->unlock();
+    }
+    else
+    {
+        _osmosdr_sink->set_gain_mode(false);
+        _osmosdr_sink->set_gain(value, gain_stage);
     }
 }
 
@@ -456,10 +499,34 @@ void gr_mod_base::set_ctcss(float value)
     _top_block->unlock();
 }
 
-void gr_mod_base::set_bb_gain(int value)
+void gr_mod_base::set_filter_width(int filter_width, int mode)
 {
-    _top_block->lock();
-    _2fsk->set_bb_gain(value);
+    switch(mode)
+    {
+    case gr_modem_types::ModemTypeAM5000:
+        _am->set_filter_width(filter_width);
+        break;
+    case gr_modem_types::ModemTypeNBFM2500:
+        _fm_2500->set_filter_width(filter_width);
+        break;
+    case gr_modem_types::ModemTypeNBFM5000:
+        _fm_5000->set_filter_width(filter_width);
+        break;
+    case gr_modem_types::ModemTypeUSB2500:
+        _usb->set_filter_width(filter_width);
+        break;
+    case gr_modem_types::ModemTypeLSB2500:
+        _lsb->set_filter_width(filter_width);
+        break;
+    default:
+        break;
+    }
+}
+
+void gr_mod_base::set_bb_gain(float value)
+{
+    _2fsk_2k->set_bb_gain(value);
+    _2fsk_1k->set_bb_gain(value);
     _2fsk_10k->set_bb_gain(value);
     _4fsk_2k->set_bb_gain(value);
     _4fsk_10k->set_bb_gain(value);
@@ -475,7 +542,11 @@ void gr_mod_base::set_bb_gain(int value)
     _usb->set_bb_gain(value);
     _lsb->set_bb_gain(value);
     _freedv_tx1600_usb->set_bb_gain(value);
-    _top_block->unlock();
+    _freedv_tx1600_lsb->set_bb_gain(value);
+    _freedv_tx700C_usb->set_bb_gain(value);
+    _freedv_tx700C_lsb->set_bb_gain(value);
+    _freedv_tx800XA_usb->set_bb_gain(value);
+    _freedv_tx800XA_lsb->set_bb_gain(value);
 }
 
 // unused because of fixed sample rate
@@ -483,7 +554,6 @@ void gr_mod_base::set_carrier_offset(long carrier_offset)
 {
     _carrier_offset = carrier_offset;
     _rotator->set_phase_inc(2*M_PI*-_carrier_offset/_samp_rate);
-
 }
 
 void gr_mod_base::flush_sources()

@@ -14,37 +14,48 @@
 // along with this program; if not, write to the Free Software
 // Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
-#ifndef AUDIOREADER_H
-#define AUDIOREADER_H
+#ifndef AUDIOWRITER_H
+#define AUDIOWRITER_H
 
+#include <QObject>
+#include <QVector>
 #include <QCoreApplication>
 #include <QMutex>
-#include "audio/audiointerface.h"
+#include <QAudioOutput>
+#include "audio/audioprocessor.h"
+#include "settings.h"
+#include "logger.h"
 
-class AudioReader : public QObject
+class AudioWriter : public QObject
 {
     Q_OBJECT
 public:
-    explicit AudioReader(QObject *parent = 0);
+    explicit AudioWriter(const Settings *settings, Logger *logger, QObject *parent = 0);
+    ~AudioWriter();
 
 signals:
     void finished();
-    void audioPCM(short *pcm, int bytes, int vad, bool radio_only);
 
 public slots:
     void run();
-    void setReadMode(bool capture, bool preprocess, int audio_mode);
+    void writePCM(short *pcm, int bytes, bool preprocess, int audio_mode);
     void stop();
 
 private:
-    AudioInterface *_audio_reader;
+    struct audio_samples
+    {
+        audio_samples() : pcm(0), bytes(0), preprocess(false), audio_mode(0) {}
+        short *pcm;
+        int bytes;
+        bool preprocess;
+        int audio_mode;
+    };
+    const Settings *_settings;
+    Logger *_logger;
+    QVector<audio_samples*> *_rx_sample_queue;
     bool _working;
-    bool _capture_audio;
-    bool _read_preprocess;
-    int _read_audio_mode;
     QMutex _mutex;
-
 
 };
 
-#endif // AUDIOREADER_H
+#endif // AUDIOWRITER_H

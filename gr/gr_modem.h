@@ -33,22 +33,7 @@
 #include "gr/gr_mod_base.h"
 #include "gr/gr_demod_base.h"
 
-
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <stdint.h>
-// posix interrupt timers
-#include <time.h>
-// needed for usleep
-#include <unistd.h>
-#include <strings.h>
 #include <math.h>
-// ioctl for CS driving serial port (PTT)
-#include <sys/ioctl.h>
-// for serial port out (PTT)
-#include <termios.h>
-
 
 
 class gr_modem : public QObject
@@ -67,10 +52,10 @@ public:
         FrameTypeRepeaterInfo,
         FrameTypeEnd
     };
-    explicit gr_modem(Settings *settings, QObject *parent = 0);
+    // FIXME: there is no reason for the modem to use the settings
+    explicit gr_modem(const Settings *settings, QObject *parent = 0);
     ~gr_modem();
-    long _frequency_found;
-    long _requested_frequency_hz;
+
     bool demodulateAnalog();
     void sendCallsign(QString callsign);
 
@@ -88,6 +73,7 @@ signals:
     void syncIssues();
     void receiveEnd();
     void endAudioTransmission();
+
 public slots:
     void transmitPCMAudio(std::vector<float> *audio_data);
     void transmitDigitalAudio(unsigned char *data, int size);
@@ -98,8 +84,10 @@ public slots:
     void endTransmission(QString callsign);
     void textData(QString text, int frame_type = FrameTypeText);
     void binData(QByteArray bin_data, int frame_type = FrameTypeRepeaterInfo);
-    void initTX(int modem_type, std::string device_args, std::string device_antenna, int freq_corr);
-    void initRX(int modem_type, std::string device_args, std::string device_antenna, int freq_corr);
+    void initTX(int modem_type, std::string device_args,
+                std::string device_antenna, int freq_corr);
+    void initRX(int modem_type, std::string device_args,
+                std::string device_antenna, int freq_corr);
     void deinitTX(int modem_type);
     void deinitRX(int modem_type);
     void toggleRxMode(int modem_type);
@@ -110,15 +98,19 @@ public slots:
     void stopRX();
     void startTX();
     void stopTX();
-    void setTxPower(float value);
+    void setTxPower(float value, std::string gain_stage="");
     void setBbGain(int value);
     void setSquelch(int value);
-    void setRxSensitivity(double value);
+    void setFilterWidth(int filter_width);
+    void setRxSensitivity(double value, std::string gain_stage="");
+    void setAgcAttack(float value);
+    void setAgcDecay(float value);
     void setRxCTCSS(float value);
     void setTxCTCSS(float value);
     void enableGUIConst(bool value);
     void enableGUIFFT(bool value);
     void enableRSSI(bool value);
+    void calibrateRSSI(float value);
     void enableDemod(bool value);
     double getFreqGUI();
     void setRepeater(bool value);
@@ -130,25 +122,26 @@ public slots:
     float getRSSI();
     void flushSources();
     std::vector<gr_complex> *getConstellation();
+    const QMap<std::string, QVector<int> > getRxGainNames() const;
+    const QMap<std::string, QVector<int> > getTxGainNames() const;
 
 private:
-    std::vector<unsigned char>* frame(unsigned char *encoded_audio, int data_size, int frame_type=FrameTypeVoice);
+    std::vector<unsigned char>* frame(unsigned char *encoded_audio,
+                                      int data_size, int frame_type=FrameTypeVoice);
     void processReceivedData(unsigned char* received_data, int current_frame_type);
     void handleStreamEnd();
     int findSync(unsigned char bit);
     void transmit(QVector<std::vector<unsigned char>*> frames);
     bool synchronize(int v_size, std::vector<unsigned char> *data);
 
-    Settings *_settings;
+    const Settings *_settings;
     gr_mod_base *_gr_mod_base;
     gr_demod_base *_gr_demod_base;
     unsigned char *_bit_buf;
 
     long _bit_buf_index;
     int _bit_buf_len;
-    quint64 _sequence_number;
-    bool _transmitting;
-    bool _repeater;
+    bool _direct_mode_repeater;
     int _modem_type_rx;
     int _modem_type_tx;
     int _tx_frame_length;
@@ -158,6 +151,7 @@ private:
     bool _sync_found;
     int _current_frame_type;
     unsigned long long _shift_reg;
+    bool _burst_ip_modem;
 
 };
 

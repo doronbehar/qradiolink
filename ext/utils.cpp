@@ -66,14 +66,40 @@ void genRandomStr(char *str, const int len)
     str[len] = 0;
 }
 
-std::vector<std::complex<int>>* buildFilterWidthList()
+void buildModeList(QVector<QString> *operating_modes)
 {
-    std::vector<std::complex<int>> *filter_widths = new std::vector<std::complex<int>>;
-    filter_widths->push_back(std::complex<int>(-5000, 5000));  // FM
+    operating_modes->push_back("FM");
+    operating_modes->push_back("Narrow FM");
+    operating_modes->push_back("Wide FM");
+    operating_modes->push_back("USB");
+    operating_modes->push_back("LSB");
+    operating_modes->push_back("FreeDV1600 USB");
+    operating_modes->push_back("FreeDV700C USB");
+    operating_modes->push_back("FreeDV800XA USB");
+    operating_modes->push_back("FreeDV1600 LSB");
+    operating_modes->push_back("FreeDV700C LSB");
+    operating_modes->push_back("FreeDV800XA LSB");
+    operating_modes->push_back("AM");
+    operating_modes->push_back("BPSK 2K");
+    operating_modes->push_back("BPSK 1K");
+    operating_modes->push_back("QPSK 2K");
+    operating_modes->push_back("QPSK 10K");
+    operating_modes->push_back("2FSK 2K");
+    operating_modes->push_back("2FSK 1K");
+    operating_modes->push_back("2FSK 10K");
+    operating_modes->push_back("4FSK 2K");
+    operating_modes->push_back("4FSK 10K");
+    operating_modes->push_back("Video 250K");
+    operating_modes->push_back("IP modem 250K");
+}
+
+void buildFilterWidthList(std::vector<std::complex<int>>* filter_widths, std::vector<std::complex<int>>*ranges, std::vector<bool> *symmetric)
+{
+    filter_widths->push_back(std::complex<int>(-6500, 6500));  // FM
     filter_widths->push_back(std::complex<int>(-2500, 2500));  // NBFM
     filter_widths->push_back(std::complex<int>(-100000, 100000));  // WFM
-    filter_widths->push_back(std::complex<int>(-1, 2500)); // USB
-    filter_widths->push_back(std::complex<int>(-2500, 1)); // LSB
+    filter_widths->push_back(std::complex<int>(100, 2700)); // USB
+    filter_widths->push_back(std::complex<int>(-2700, -100)); // LSB
     filter_widths->push_back(std::complex<int>(-1, 2500)); // FreeDV1600 USB
     filter_widths->push_back(std::complex<int>(-1, 2500)); // FreeDV700C USB
     filter_widths->push_back(std::complex<int>(-1, 2500)); // FreeDV800XA USB
@@ -85,14 +111,73 @@ std::vector<std::complex<int>>* buildFilterWidthList()
     filter_widths->push_back(std::complex<int>(-1400, 1400)); // BPSK 700
     filter_widths->push_back(std::complex<int>(-1500, 1500));  // QPSK 2K
     filter_widths->push_back(std::complex<int>(-7000, 7000));    // QPSK 10K
-    filter_widths->push_back(std::complex<int>(-4600, 4600));  // 2FSK 2K
+    filter_widths->push_back(std::complex<int>(-2700, 2700));  // 2FSK 2K
+    filter_widths->push_back(std::complex<int>(-1350, 1350));  // 2FSK 1K
     filter_widths->push_back(std::complex<int>(-15000, 15000));  // 2FSK 10K
     filter_widths->push_back(std::complex<int>(-4600, 4600));  // 4FSK 2K
     filter_widths->push_back(std::complex<int>(-25000, 25000));    // 4FSK 10K
     filter_widths->push_back(std::complex<int>(-150000, 150000)); // QPSK250000 VIDEO
     filter_widths->push_back(std::complex<int>(-150000, 150000)); // QPSK250000 DATA
-    return filter_widths;
+
+
+    ranges->push_back(std::complex<int>(-10000, 10000));  // FM
+    ranges->push_back(std::complex<int>(-9000, 9000));  // NBFM
+    ranges->push_back(std::complex<int>(-100000, 100000));  // WFM
+    ranges->push_back(std::complex<int>(200, 3800)); // USB
+    ranges->push_back(std::complex<int>(-3800, -200)); // LSB
+    ranges->push_back(std::complex<int>(200, 2500)); // FreeDV1600 USB
+    ranges->push_back(std::complex<int>(200, 2500)); // FreeDV700C USB
+    ranges->push_back(std::complex<int>(200, 2500)); // FreeDV800XA USB
+    ranges->push_back(std::complex<int>(-2500, -200)); // FreeDV1600 LSB
+    ranges->push_back(std::complex<int>(-2500, -200)); // FreeDV700C LSB
+    ranges->push_back(std::complex<int>(-2500, -200)); // FreeDV800XA LSB
+    ranges->push_back(std::complex<int>(-9000, 9000));  // AM
+    ranges->push_back(std::complex<int>(-2800, 2800)); // BPSK 2K
+    ranges->push_back(std::complex<int>(-1400, 1400)); // BPSK 700
+    ranges->push_back(std::complex<int>(-1500, 1500));  // QPSK 2K
+    ranges->push_back(std::complex<int>(-7000, 7000));    // QPSK 10K
+    ranges->push_back(std::complex<int>(-2700, 2700));  // 2FSK 2K
+    ranges->push_back(std::complex<int>(-1350, 1350));  // 2FSK 1K
+    ranges->push_back(std::complex<int>(-15000, 15000));  // 2FSK 10K
+    ranges->push_back(std::complex<int>(-4600, 4600));  // 4FSK 2K
+    ranges->push_back(std::complex<int>(-25000, 25000));    // 4FSK 10K
+    ranges->push_back(std::complex<int>(-150000, 150000)); // QPSK250000 VIDEO
+    ranges->push_back(std::complex<int>(-150000, 150000)); // QPSK250000 DATA
+
+    symmetric->push_back(true);  // FM
+    symmetric->push_back(true);  // NBFM
+    symmetric->push_back(true);  // WFM
+    symmetric->push_back(false); // USB
+    symmetric->push_back(false); // LSB
+    symmetric->push_back(false); // FreeDV1600 USB
+    symmetric->push_back(false); // FreeDV700C USB
+    symmetric->push_back(false); // FreeDV800XA USB
+    symmetric->push_back(false); // FreeDV1600 LSB
+    symmetric->push_back(false); // FreeDV700C LSB
+    symmetric->push_back(false); // FreeDV800XA LSB
+    symmetric->push_back(true);  // AM
+    symmetric->push_back(true); // BPSK 2K
+    symmetric->push_back(true); // BPSK 700
+    symmetric->push_back(true);  // QPSK 2K
+    symmetric->push_back(true);    // QPSK 10K
+    symmetric->push_back(true);  // 2FSK 2K
+    symmetric->push_back(true);  // 2FSK 1K
+    symmetric->push_back(true);  // 2FSK 10K
+    symmetric->push_back(true);  // 4FSK 2K
+    symmetric->push_back(true);    // 4FSK 10K
+    symmetric->push_back(true); // QPSK250000 VIDEO
+    symmetric->push_back(true); // QPSK250000 DATA
+
 }
 
 
-
+void unpackBytes(unsigned char *bitbuf, const unsigned char *bytebuf, int bytecount)
+{
+    for(int i=0; i<bytecount; i++)
+    {
+        for(int j=0; j<8; j++)
+        {
+            bitbuf[i*8+j] = (bytebuf[i] & (128 >> j)) != 0;
+        }
+    }
+}

@@ -49,6 +49,7 @@ gr_deframer_bb::gr_deframer_bb(int modem_type) :
 
 gr_deframer_bb::~gr_deframer_bb()
 {
+    _data->clear();
     delete _data;
 }
 
@@ -132,6 +133,7 @@ int gr_deframer_bb::findSync(unsigned char bit)
 int gr_deframer_bb::work(int noutput_items, gr_vector_const_void_star &input_items,
                      gr_vector_void_star &output_items)
 {
+    (void) output_items;
     if(noutput_items < 1)
     {
         struct timespec time_to_sleep = {0, 1000L };

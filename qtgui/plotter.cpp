@@ -70,7 +70,7 @@ int gettimeofday(struct timeval * tp, struct timezone * tzp)
 //#define PLOTTER_DEBUG
 
 
-#define CUR_CUT_DELTA 1		//cursor capture delta in pixels
+#define CUR_CUT_DELTA 2		//cursor capture delta in pixels
 
 #define FFT_MIN_DB     -180.f
 #define FFT_MAX_DB      30.f
@@ -79,9 +79,9 @@ int gettimeofday(struct timeval * tp, struct timezone * tzp)
 #define PLOTTER_BGD_COLOR           0xFF1F1D1D
 #define PLOTTER_GRID_COLOR          0xFF444242
 #define PLOTTER_TEXT_COLOR          0xFFDADADA
-#define PLOTTER_CENTER_LINE_COLOR   0xFF788296
-#define PLOTTER_FILTER_LINE_COLOR   0xFFFF7171
-#define PLOTTER_FILTER_BOX_COLOR    0xFFA0A0A4
+#define PLOTTER_CENTER_LINE_COLOR   0xFF00B0B0
+#define PLOTTER_FILTER_LINE_COLOR   0xFFE10000
+#define PLOTTER_FILTER_BOX_COLOR    0xFF00882B
 // FIXME: Should cache the QColors also
 
 static inline bool val_is_out_of_range(float val, float min, float max)
@@ -188,7 +188,7 @@ CPlotter::CPlotter(QWidget *parent) : QOpenGLWidget(parent)
     m_Span = 96000;
     m_SampleFreq = 96000;
 
-    m_HorDivs = 12;
+    m_HorDivs = 10;
     m_VerDivs = 6;
     m_PandMaxdB = m_WfMaxdB = 0.f;
     m_PandMindB = m_WfMindB = -150.f;
@@ -1092,7 +1092,7 @@ void CPlotter::draw()
             m_WaterfallPixmap.scroll(0, 1, 0, 0, w, h);
 
             QPainter painter1(&m_WaterfallPixmap);
-            painter1.setRenderHint(QPainter::HighQualityAntialiasing);
+            painter1.setRenderHint(QPainter::SmoothPixmapTransform);
             painter1.setCompositionMode(QPainter::CompositionMode_Source);
 
             // draw new line of fft data at top of waterfall bitmap
@@ -1434,6 +1434,10 @@ void CPlotter::drawOverlay()
     painter.setFont(m_Font);
 
     // solid background
+    QLinearGradient gradient(w/2, 0, w/2, h);
+    gradient.setColorAt(1, QColor("#181818")); // #053856
+    gradient.setColorAt(0, QColor("#181818")); // #24678e
+    Q_UNUSED(gradient);
     painter.setBrush(Qt::SolidPattern);
     painter.fillRect(0, 0, w, h, QColor(PLOTTER_BGD_COLOR));
 
@@ -1480,11 +1484,11 @@ void CPlotter::drawOverlay()
     painter.setPen(QColor(PLOTTER_TEXT_COLOR));
     for (int i = 0; i <= m_HorDivs; i++)
     {
-        int tw = metrics.width(m_HDivText[i]) + 3;
+        int tw = metrics.width(m_HDivText[i]);
         x = (int)((float)i*pixperdiv + adjoffset);
         if (x > m_YAxisWidth)
         {
-            rect.setRect(x - tw/2, fLabelTop, tw, metrics.height());
+            rect.setRect(x - tw/2, fLabelTop, tw*2, metrics.height());
             painter.drawText(rect, Qt::AlignHCenter|Qt::AlignBottom, m_HDivText[i]);
         }
     }
@@ -1542,12 +1546,12 @@ void CPlotter::drawOverlay()
 
         int dw = m_DemodHiCutFreqX - m_DemodLowCutFreqX;
 
-        painter.setOpacity(0.3);
+        painter.setOpacity(0.4);
         painter.fillRect(m_DemodLowCutFreqX, 0, dw, h,
                          QColor(PLOTTER_FILTER_BOX_COLOR));
 
         painter.setOpacity(1.0);
-        painter.setPen(QColor(PLOTTER_FILTER_LINE_COLOR));
+        painter.setPen(QPen(QColor(PLOTTER_FILTER_LINE_COLOR), 1, Qt::SolidLine, Qt::SquareCap, Qt::RoundJoin));
         painter.drawLine(m_DemodFreqX, 0, m_DemodFreqX, h);
     }
 
@@ -1754,8 +1758,8 @@ void CPlotter::moveToDemodFreq(void)
 void CPlotter::setFftPlotColor(const QColor color)
 {
     m_FftColor = color;
-    m_FftFillCol = color;
-    m_FftFillCol.setAlpha(0x1A);
+    m_FftFillCol = QColor("#009ec1");
+    m_FftFillCol.setAlpha(0x7A);
     m_PeakHoldColor = color;
     m_PeakHoldColor.setAlpha(60);
 }

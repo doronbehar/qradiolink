@@ -16,14 +16,13 @@
 
 #include "gr_modem.h"
 
-gr_modem::gr_modem(Settings *settings, QObject *parent) :
+gr_modem::gr_modem(const Settings *settings, QObject *parent) :
     QObject(parent)
 {
     _modem_type_rx = gr_modem_types::ModemTypeBPSK2000;
     _modem_type_tx = gr_modem_types::ModemTypeBPSK2000;
-    _repeater = false;
+    _direct_mode_repeater = false;
     _settings = settings;
-    _transmitting = false;
     _rx_frame_length = 7;
     _tx_frame_length = 7;
     _bit_buf_len = 8 *8;
@@ -34,11 +33,9 @@ gr_modem::gr_modem(Settings *settings, QObject *parent) :
     _shift_reg = 0;
     _last_frame_type = FrameTypeNone;
     _current_frame_type = FrameTypeNone;
-    _frequency_found =0;
-    _requested_frequency_hz = 433500000;
     _gr_mod_base = 0;
     _gr_demod_base = 0;
-
+    _burst_ip_modem = false;
 
 }
 
@@ -53,7 +50,8 @@ gr_modem::~gr_modem()
 void gr_modem::initTX(int modem_type, std::string device_args, std::string device_antenna, int freq_corr)
 {
     _modem_type_tx = modem_type;
-    _gr_mod_base = new gr_mod_base(0, _requested_frequency_hz, 0.5, device_args, device_antenna, freq_corr);
+    _gr_mod_base = new gr_mod_base(
+                0, 433500000, 0.5, device_args, device_antenna, freq_corr);
     toggleTxMode(modem_type);
 
 }
@@ -61,7 +59,8 @@ void gr_modem::initTX(int modem_type, std::string device_args, std::string devic
 void gr_modem::initRX(int modem_type, std::string device_args, std::string device_antenna, int freq_corr)
 {
     _modem_type_rx = modem_type;
-    _gr_demod_base = new gr_demod_base(0, _requested_frequency_hz, 0.9, device_args, device_antenna, freq_corr);
+    _gr_demod_base = new gr_demod_base(
+                0, 433500000, 0.9, device_args, device_antenna, freq_corr);
     toggleRxMode(modem_type);
 
 }
@@ -89,6 +88,7 @@ void gr_modem::deinitRX(int modem_type)
     }
 }
 
+
 void gr_modem::toggleTxMode(int modem_type)
 {
     _modem_type_tx = modem_type;
@@ -100,6 +100,10 @@ void gr_modem::toggleTxMode(int modem_type)
             _tx_frame_length = 7;
         }
         else if(modem_type == gr_modem_types::ModemTypeBPSK1000)
+        {
+            _tx_frame_length = 4;
+        }
+        else if(modem_type == gr_modem_types::ModemType2FSK1000)
         {
             _tx_frame_length = 4;
         }
@@ -155,6 +159,11 @@ void gr_modem::toggleRxMode(int modem_type)
             _bit_buf_len = 4 *8;
             _rx_frame_length = 4;
         }
+        else if(modem_type == gr_modem_types::ModemType2FSK1000)
+        {
+            _bit_buf_len = 4 *8;
+            _rx_frame_length = 4;
+        }
         else if (modem_type == gr_modem_types::ModemTypeQPSK20000)
         {
             _bit_buf_len = 48 *8;
@@ -200,6 +209,32 @@ void gr_modem::toggleRxMode(int modem_type)
     }
 }
 
+
+///
+/// Start of proxy methods, will be refactored
+///
+
+const QMap<std::string,QVector<int>> gr_modem::getRxGainNames() const
+{
+    if(_gr_demod_base)
+        return _gr_demod_base->get_gain_names();
+    else
+    {
+        QMap<std::string,QVector<int>> none;
+        return none;
+    }
+}
+
+const QMap<std::string,QVector<int>> gr_modem::getTxGainNames() const
+{
+    if(_gr_mod_base)
+        return _gr_mod_base->get_gain_names();
+    else
+    {
+        QMap<std::string,QVector<int>> none;
+        return none;
+    }
+}
 
 void gr_modem::startRX()
 {
@@ -285,28 +320,48 @@ void gr_modem::setFFTSize(int size)
         _gr_demod_base->set_fft_size(size);
 }
 
-void gr_modem::setTxPower(float value)
+void gr_modem::setTxPower(float value, std::string gain_stage)
 {
     if(_gr_mod_base)
-        _gr_mod_base->set_power(value);
+        _gr_mod_base->set_power(value, gain_stage);
 }
 
 void gr_modem::setBbGain(int value)
 {
+    float bb_gain = (float)value / 5.0;
     if(_gr_mod_base)
-        _gr_mod_base->set_bb_gain(value);
+        _gr_mod_base->set_bb_gain(bb_gain);
 }
 
-void gr_modem::setRxSensitivity(double value)
+void gr_modem::setRxSensitivity(double value, std::string gain_stage)
 {
     if(_gr_demod_base)
-        _gr_demod_base->set_rx_sensitivity(value);
+        _gr_demod_base->set_rx_sensitivity(value, gain_stage);
+}
+
+void gr_modem::setAgcAttack(float value)
+{
+    if(_gr_demod_base)
+        _gr_demod_base->set_agc_attack(value);
+}
+void gr_modem::setAgcDecay(float value)
+{
+    if(_gr_demod_base)
+        _gr_demod_base->set_agc_decay(value);
 }
 
 void gr_modem::setSquelch(int value)
 {
     if(_gr_demod_base)
         _gr_demod_base->set_squelch(value);
+}
+
+void gr_modem::setFilterWidth(int width)
+{
+    if(_gr_demod_base)
+        _gr_demod_base->set_filter_width(width, _modem_type_rx);
+    if(_gr_mod_base)
+        _gr_mod_base->set_filter_width(width, _modem_type_tx);
 }
 
 void gr_modem::setRxCTCSS(float value)
@@ -339,15 +394,28 @@ void gr_modem::enableRSSI(bool value)
         _gr_demod_base->enable_rssi(value);
 }
 
+void gr_modem::calibrateRSSI(float value)
+{
+    if(_gr_demod_base)
+        _gr_demod_base->calibrate_rssi(value);
+}
+
 void gr_modem::enableDemod(bool value)
 {
     if(_gr_demod_base)
         _gr_demod_base->enable_demodulator(value);
 }
 
+///
+/// End of proxy methods (for refactor)
+///
+
+
+/// allows audio to bypass RadioController transcoding and loop
+/// back directly to radio
 void gr_modem::setRepeater(bool value)
 {
-    _repeater = value;
+    _direct_mode_repeater = value;
 }
 
 void gr_modem::sendCallsign(QString callsign)
@@ -375,7 +443,6 @@ void gr_modem::sendCallsign(QString callsign)
 
 void gr_modem::startTransmission(QString callsign)
 {
-    _transmitting = true;
     std::vector<unsigned char> *tx_start = new std::vector<unsigned char>;
     for(int i = 0;i<_tx_frame_length*2;i++)
     {
@@ -391,15 +458,14 @@ void gr_modem::startTransmission(QString callsign)
 void gr_modem::endTransmission(QString callsign)
 {
     _frame_counter = 0;
-    _transmitting = false;
     sendCallsign(callsign);
     std::vector<unsigned char> *tx_end = new std::vector<unsigned char>;
     tx_end->push_back(0x4C);
     tx_end->push_back(0x8A);
     tx_end->push_back(0x2B);
-    for(int i = 0;i<_tx_frame_length;i++)
+    for(int i = 0;i<_tx_frame_length*10;i++)
     {
-        tx_end->push_back(0x01);
+        tx_end->push_back(0xAA);
     }
     QVector<std::vector<unsigned char>*> frames;
     frames.append(tx_end);
@@ -423,9 +489,7 @@ void gr_modem::textData(QString text, int frame_type)
         memset(data, 0, _tx_frame_length);
         memcpy(data,chunk.toStdString().c_str(),chunk.length());
         std::vector<unsigned char> *one_frame = frame(data,_tx_frame_length, frame_type);
-
         frames.append(one_frame);
-
         delete[] data;
     }
     transmit(frames);
@@ -445,8 +509,8 @@ void gr_modem::binData(QByteArray bin_data, int frame_type)
         memset(data, 0, _tx_frame_length);
         memcpy(data, c, copy);
         std::vector<unsigned char> *one_frame = frame(data,_tx_frame_length, frame_type);
-
         frames.append(one_frame);
+        delete[] data;
     }
     transmit(frames);
 }
@@ -464,19 +528,15 @@ void gr_modem::transmitDigitalAudio(unsigned char *data, int size)
 
 void gr_modem::transmitPCMAudio(std::vector<float> *audio_data)
 {
-
     if(!_gr_mod_base)
     {
         audio_data->clear();
         delete audio_data;
         return;
     }
-
     int ret = 1;
     while(ret)
     {
-        struct timespec time_to_sleep = {0, 1000L };
-        nanosleep(&time_to_sleep, NULL);
         ret = _gr_mod_base->set_audio(audio_data);
     }
 }
@@ -502,9 +562,15 @@ void gr_modem::transmitNetData(unsigned char *data, int size)
 std::vector<unsigned char>* gr_modem::frame(unsigned char *encoded_audio, int data_size, int frame_type)
 {
     std::vector<unsigned char> *data = new std::vector<unsigned char>;
+    if(frame_type == FrameTypeData && _burst_ip_modem)
+    {
+        for(int i = 0;i < 25;i++)
+            data->push_back(0xCC);
+    }
     if(frame_type == FrameTypeVoice)
     {
-        if(_modem_type_tx == gr_modem_types::ModemTypeBPSK1000)
+        if((_modem_type_tx == gr_modem_types::ModemTypeBPSK1000)
+                || (_modem_type_tx == gr_modem_types::ModemType2FSK1000))
         {
             data->push_back(0xB5);
         }
@@ -535,7 +601,8 @@ std::vector<unsigned char>* gr_modem::frame(unsigned char *encoded_audio, int da
         data->push_back(0x77);
     }
 
-    if(_modem_type_tx != gr_modem_types::ModemTypeBPSK1000)
+    if((_modem_type_tx != gr_modem_types::ModemTypeBPSK1000) &&
+            (_modem_type_tx != gr_modem_types::ModemType2FSK1000))
         data->push_back(0xAA); // frame start
     for(int i=0;i< data_size;i++)
     {
@@ -543,7 +610,6 @@ std::vector<unsigned char>* gr_modem::frame(unsigned char *encoded_audio, int da
     }
 
     return data;
-
 }
 
 void gr_modem::transmit(QVector<std::vector<unsigned char>*> frames)
@@ -562,7 +628,6 @@ void gr_modem::transmit(QVector<std::vector<unsigned char>*> frames)
     int ret = 1;
     while(ret)
     {
-        struct timespec time_to_sleep = {0, 1000L };
         ret = _gr_mod_base->set_data(all_frames);
     }
 
@@ -584,21 +649,10 @@ static void packBytes(unsigned char *pktbuf, const unsigned char *bitbuf, int bi
     }
 }
 
-static void unpackBytes(unsigned char *bitbuf, const unsigned char *bytebuf, int bytecount)
-{
-    for(int i=0; i<bytecount; i++)
-    {
-        for(int j=0; j<8; j++)
-        {
-            bitbuf[i*8+j] = (bytebuf[i] & (128 >> j)) != 0;
-        }
-    }
-}
-
 void gr_modem::getFFTData(float* data, unsigned int &size)
 {
     if(_gr_demod_base)
-        _gr_demod_base->getFFTData(data, size);
+        _gr_demod_base->get_FFT_data(data, size);
 }
 
 float gr_modem::getRSSI()
@@ -630,9 +684,11 @@ bool gr_modem::demodulateAnalog()
     }
     std::vector<float> *audio_data = nullptr;
     audio_data = _gr_demod_base->getAudio();
+    if(audio_data == nullptr)
+        return false;
     if(audio_data->size() > 0)
     {
-        if(_repeater)
+        if(_direct_mode_repeater)
         {
             std::vector<float> *repeated_audio = new std::vector<float>(audio_data->begin(),audio_data->end());
             transmitPCMAudio(repeated_audio);
@@ -661,19 +717,27 @@ bool gr_modem::demodulate()
     if((_modem_type_rx == gr_modem_types::ModemTypeBPSK2000)
             || (_modem_type_rx == gr_modem_types::ModemType2FSK2000)
             || (_modem_type_rx == gr_modem_types::ModemType2FSK20000)
-            || (_modem_type_rx == gr_modem_types::ModemTypeBPSK1000))
+            || (_modem_type_rx == gr_modem_types::ModemTypeBPSK1000)
+            || (_modem_type_rx == gr_modem_types::ModemType2FSK1000))
     {
         demod_data = _gr_demod_base->getData(1);
         demod_data2 = _gr_demod_base->getData(2);
+        if((demod_data == nullptr) || (demod_data2 == nullptr))
+            return false;
     }     
     else
+    {
         demod_data = _gr_demod_base->getData();
+        if(demod_data == nullptr)
+            return false;
+    }
 
     int v_size;
     if((_modem_type_rx == gr_modem_types::ModemTypeBPSK2000)
             || (_modem_type_rx == gr_modem_types::ModemTypeBPSK1000)
             || (_modem_type_rx == gr_modem_types::ModemType2FSK20000)
-            || (_modem_type_rx == gr_modem_types::ModemType2FSK2000))
+            || (_modem_type_rx == gr_modem_types::ModemType2FSK2000)
+            || (_modem_type_rx == gr_modem_types::ModemType2FSK1000))
     {
         if(demod_data->size() >= demod_data2->size())
         {
@@ -698,7 +762,8 @@ bool gr_modem::demodulate()
     if((_modem_type_rx == gr_modem_types::ModemTypeBPSK2000)
             || (_modem_type_rx == gr_modem_types::ModemTypeBPSK1000)
             || (_modem_type_rx == gr_modem_types::ModemType2FSK20000)
-            || (_modem_type_rx == gr_modem_types::ModemType2FSK2000))
+            || (_modem_type_rx == gr_modem_types::ModemType2FSK2000)
+            || (_modem_type_rx == gr_modem_types::ModemType2FSK1000))
     {
         demod_data2->clear();
         delete demod_data2;
@@ -720,24 +785,22 @@ bool gr_modem::synchronize(int v_size, std::vector<unsigned char> *data)
                 _bit_buf_index = 0;
                 continue;
             }
-            if(_frequency_found > 0)
-                _frequency_found--; // substract one bit
         }
         if(_sync_found)
         {
             data_to_process = true;
-            if(_frequency_found < 255)
-                _frequency_found += 1; // 80 bits + counter
             _bit_buf[_bit_buf_index] =  (data->at(i)) & 0x1;
             _bit_buf_index++;
             int frame_length = _rx_frame_length;
             int bit_buf_len = _bit_buf_len;
             if((_modem_type_rx != gr_modem_types::ModemTypeBPSK1000)
+                    && (_modem_type_rx != gr_modem_types::ModemType2FSK1000)
                     && (_current_frame_type == FrameTypeVoice))
             {
                 frame_length++; // reserved data
             }
             else if((_modem_type_rx != gr_modem_types::ModemTypeBPSK1000)
+                    && (_modem_type_rx != gr_modem_types::ModemType2FSK1000)
                     && (_current_frame_type != FrameTypeVoice))
             {
                 bit_buf_len = _bit_buf_len - 8;
@@ -761,7 +824,8 @@ int gr_modem::findSync(unsigned char bit)
 {
     _shift_reg = (_shift_reg << 1) | (bit & 0x1);
     u_int32_t temp;
-    if(_modem_type_rx == gr_modem_types::ModemTypeBPSK1000)
+    if((_modem_type_rx == gr_modem_types::ModemTypeBPSK1000) ||
+            (_modem_type_rx == gr_modem_types::ModemType2FSK1000))
     {
         temp = _shift_reg & 0xFF;
         if (temp == 0xB5)
@@ -849,7 +913,7 @@ void gr_modem::processReceivedData(unsigned char *received_data, int current_fra
             }
         }
         QString text = QString::fromLocal8Bit(text_data,string_length);
-        if(_repeater)
+        if(_direct_mode_repeater)
         {
             textData(text);
         }
@@ -866,20 +930,13 @@ void gr_modem::processReceivedData(unsigned char *received_data, int current_fra
     else if (current_frame_type == FrameTypeCallsign)
     {
         _last_frame_type = FrameTypeCallsign;
-        char *text_data = new char[_rx_frame_length];
-        memcpy(text_data, received_data, _rx_frame_length);
-        quint8 string_length = _rx_frame_length;
+        char *text_data = new char[8];
+        memset(text_data, 0, 8);
+        memcpy(text_data, received_data, 7);
 
-        for(int ii=_rx_frame_length-1;ii>=0;ii--)
-        {
-            QChar x(text_data[ii]);
-            if(x.unicode()==0)
-            {
-                string_length--;
-            }
-        }
-        QString callsign = QString::fromLocal8Bit(text_data,string_length);
-        if(_repeater)
+        QString callsign(text_data);
+        callsign = callsign.remove(QRegExp("[^a-zA-Z/\\d\\s]"));
+        if(_direct_mode_repeater)
         {
             sendCallsign(callsign);
         }
@@ -892,11 +949,12 @@ void gr_modem::processReceivedData(unsigned char *received_data, int current_fra
         _last_frame_type = FrameTypeVoice;
         unsigned char *codec2_data = new unsigned char[_rx_frame_length];
         memset(codec2_data,0,_rx_frame_length);
-        if(_modem_type_rx == gr_modem_types::ModemTypeBPSK1000)
+        if((_modem_type_rx == gr_modem_types::ModemTypeBPSK1000) ||
+                (_modem_type_rx == gr_modem_types::ModemType2FSK1000))
             memcpy(codec2_data, received_data, _rx_frame_length);
         else
             memcpy(codec2_data, received_data+1, _rx_frame_length);
-        if(_repeater)
+        if(_direct_mode_repeater)
         {
             unsigned char *repeated_frame = new unsigned char[_rx_frame_length];
             memcpy(repeated_frame, codec2_data, _rx_frame_length);
@@ -925,22 +983,10 @@ void gr_modem::processReceivedData(unsigned char *received_data, int current_fra
 
 void gr_modem::handleStreamEnd()
 {
-    // FIXME: wrong signals emitted when text is received
     if(_last_frame_type == FrameTypeText)
     {
         emit textReceived( QString("\n"));
     }
-    else if(_last_frame_type == FrameTypeVoice)
-    {
-        emit endAudioTransmission();
-    }
-    else if(_last_frame_type == FrameTypeCallsign)
-    {
-        emit endAudioTransmission();
-    }
-    else if(_last_frame_type == FrameTypeVideo)
-    {
-        emit endAudioTransmission();
-    }
+    emit endAudioTransmission();
     emit receiveEnd();
 }

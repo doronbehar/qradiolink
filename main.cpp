@@ -23,158 +23,271 @@
 #include <QString>
 #include <QVector>
 #include <QMetaType>
-#include <QFile>
 #include <QtGlobal>
-#include <QTextStream>
-#include <iostream>
 #include "mainwindow.h"
-#include "dtmfdecoder.h"
-#include "databaseapi.h"
-#include "config_defines.h"
 #include "mumbleclient.h"
-#include "audiowriter.h"
-#include "audioreader.h"
+#include "audio/audiowriter.h"
+#include "audio/audioreader.h"
 #include "station.h"
 #include "mumblechannel.h"
 #include "radiochannel.h"
 #include "radiocontroller.h"
+#include "telnetserver.h"
+#include "logger.h"
 
 
-#if QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)
-void logMessage(QtMsgType type, const QMessageLogContext &context, const QString &msg)
-#else
-void logMessage(QtMsgType type, const char *msg)
-#endif
-{
-    QString txt;
-    switch (type) {
-    case QtDebugMsg:
-        txt = QString("Debug: %1").arg(msg);
-        break;
-    case QtWarningMsg:
-        txt = QString("Warning: %1").arg(msg);
-    break;
-    case QtCriticalMsg:
-        txt = QString("Critical: %1").arg(msg);
-    break;
-    case QtFatalMsg:
-        txt = QString("Fatal: %1").arg(msg);
-    break;
-    }
-    QFile outFile("qradiolink.log");
-    outFile.open(QIODevice::WriteOnly | QIODevice::Append);
-    QTextStream ts(&outFile);
-    ts << txt << endl;
-}
+void connectGuiSignals(TelnetServer *telnet_server, AudioWriter *audiowriter,
+                       AudioReader *audioreader, MainWindow *w, MumbleClient *mumbleclient,
+                       RadioController *radio_op);
+void connectCommandSignals(TelnetServer *telnet_server, MumbleClient *mumbleclient,
+                       RadioController *radio_op);
+
 
 int main(int argc, char *argv[])
 {
-#if 0
-#if QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)
-    qInstallMessageHandler(logMessage);
-#else
-    qInstallMsgHandler(logMessage);
-#endif
-#endif
 
-    typedef QVector<Station> StationList;
+    typedef QVector<Station*> StationList;
     qRegisterMetaType<StationList>("StationList");
+    typedef QVector<MumbleChannel*> ChannelList;
+    qRegisterMetaType<ChannelList>("ChannelList");
     typedef std::vector<std::complex<float>> complex_vector;
     qRegisterMetaType<complex_vector>("complex_vector");
+    typedef QMap<std::string,QVector<int>> gain_vector;
+    qRegisterMetaType<gain_vector>("gain_vector");
 
 
     QApplication a(argc, argv);
     a.setAttribute(Qt::AA_EnableHighDpiScaling);
-
+    QCoreApplication::setAttribute(Qt::AA_UseStyleSheetPropagationInWidgetStyles, true);
     QStringList arguments = QCoreApplication::arguments();
-    QFontDatabase::addApplicationFont(":/fonts/res/LiquidCrystal-Normal.otf");
-    QFontDatabase::addApplicationFont(":/fonts/res/LiquidCrystal-Bold.otf");
-    QFontDatabase::addApplicationFont(":/fonts/res/LiquidCrystal-BoldItalic.otf");
-    QFontDatabase::addApplicationFont(":/fonts/res/LiquidCrystal-NormalItalic.otf");
+    bool headless = false;
 
+    Logger *logger = new Logger;
+    if((arguments.length() > 1) && (arguments.indexOf("--headless") != -1))
+    {
+        logger->set_console_log(false);
+        headless = true;
+    }
 
-    std::string start_time= QDateTime::currentDateTime().toString("d/MMM/yyyy hh:mm:ss").toStdString();
-    std::cout << "Starting qradiolink instance: " << start_time << std::endl;
-    DatabaseApi db;
-    Settings *settings = new Settings;
-    RadioChannels *radio_channels = new RadioChannels;
+    /// Init main logic
+    ///
+    logger->log(Logger::LogLevelInfo, "Starting qradiolink");
+    Settings *settings = new Settings(logger);
     settings->readConfig();
-    MumbleClient *client = new MumbleClient(settings);
-    RadioController *radio_op = new RadioController(settings);
-    AudioWriter *audiowriter = new AudioWriter;
-    AudioReader *audioreader = new AudioReader;
-    MainWindow *w = new MainWindow(settings, radio_channels);
-
-    w->show();
-    if(arguments.length() > 1 && arguments.at(1) == "-f")
-    {
-        w->showMaximized();
-        w->setWindowFlags( Qt::CustomizeWindowHint | Qt::FramelessWindowHint);
-    }
-    w->activateWindow();
-    w->raise();
-
-    /*
-    QThread *t1= new QThread;
-    DtmfDecoder *decoder = new DtmfDecoder(settings);
-    if(settings->_use_dtmf)
-    {
-
-        decoder->moveToThread(t1);
-        QObject::connect(t1, SIGNAL(started()), decoder, SLOT(run()));
-        QObject::connect(decoder, SIGNAL(finished()), t1, SLOT(quit()));
-        QObject::connect(decoder, SIGNAL(finished()), decoder, SLOT(deleteLater()));
-        QObject::connect(t1, SIGNAL(finished()), t1, SLOT(deleteLater()));
-        t1->start();
-    }
+    RadioChannels *radio_channels = new RadioChannels(logger);
+    radio_channels->readConfig();
+    MumbleClient *mumbleclient = new MumbleClient(settings, logger);
+    RadioController *radio_op = new RadioController(settings, logger, radio_channels);
+    AudioWriter *audiowriter = new AudioWriter(settings, logger);
+    AudioReader *audioreader = new AudioReader(settings, logger);
+    TelnetServer *telnet_server = new TelnetServer(settings, logger);
 
 
-    QThread *t2= new QThread;
-    ServerWrapper *telnet_server_wrapper = new ServerWrapper(settings, &db);
-    telnet_server_wrapper->moveToThread(t2);
-    QObject::connect(dtmfcommand,SIGNAL(speak(QString)),telnet_server_wrapper,SLOT(addSpeech(QString)));
-    QObject::connect(telnet_server_wrapper,SIGNAL(pingServer()),client,SLOT(pingServer()));
-    QObject::connect(client,SIGNAL(onlineStations(StationList)),telnet_server_wrapper,SLOT(updateOnlineStations(StationList)));
-    QObject::connect(dtmfcommand,SIGNAL(tellStations()),telnet_server_wrapper,SLOT(tellOnlineStations()));
-    //QObject::connect(telnet_server_wrapper,SIGNAL(joinConference(int,int,int)),controller,SLOT(joinConference(int,int,int)));
-    //QObject::connect(telnet_server_wrapper,SIGNAL(leaveConference(int,int,int)),controller,SLOT(leaveConference(int,int,int)));
-    QObject::connect(t2, SIGNAL(started()), telnet_server_wrapper, SLOT(run()));
-    QObject::connect(telnet_server_wrapper, SIGNAL(finished()), t2, SLOT(quit()));
-    QObject::connect(telnet_server_wrapper, SIGNAL(finished()), telnet_server_wrapper, SLOT(deleteLater()));
+    /// Init threads
+    ///
+    QThread *t1 = new QThread;
+    t1->setObjectName("radioop");
+    radio_op->moveToThread(t1);
+    QObject::connect(t1, SIGNAL(started()), radio_op, SLOT(run()));
+    QObject::connect(radio_op, SIGNAL(finished()), t1, SLOT(quit()));
+    QObject::connect(radio_op, SIGNAL(finished()), radio_op, SLOT(deleteLater()));
+    QObject::connect(t1, SIGNAL(finished()), t1, SLOT(deleteLater()));
+    t1->start();
+
+    QThread *t2 = new QThread;
+    t2->setObjectName("audiowriter");
+    audiowriter->moveToThread(t2);
+    QObject::connect(t2, SIGNAL(started()), audiowriter, SLOT(run()));
+    QObject::connect(audiowriter, SIGNAL(finished()), t2, SLOT(quit()));
+    QObject::connect(audiowriter, SIGNAL(finished()), audiowriter, SLOT(deleteLater()));
     QObject::connect(t2, SIGNAL(finished()), t2, SLOT(deleteLater()));
     t2->start();
 
-    */
-
-
-
-    QThread *t4 = new QThread;
-    t4->setObjectName("radioop");
-    radio_op->moveToThread(t4);
-    QObject::connect(t4, SIGNAL(started()), radio_op, SLOT(run()));
-    QObject::connect(radio_op, SIGNAL(finished()), t4, SLOT(quit()));
-    QObject::connect(radio_op, SIGNAL(finished()), radio_op, SLOT(deleteLater()));
-    QObject::connect(t4, SIGNAL(finished()), t4, SLOT(deleteLater()));
-    t4->start();
-
-    QThread *t5 = new QThread;
-    t5->setObjectName("audiowriter");
-    audiowriter->moveToThread(t5);
-    QObject::connect(t5, SIGNAL(started()), audiowriter, SLOT(run()));
-    QObject::connect(audiowriter, SIGNAL(finished()), t5, SLOT(quit()));
-    QObject::connect(audiowriter, SIGNAL(finished()), audiowriter, SLOT(deleteLater()));
-    QObject::connect(t5, SIGNAL(finished()), t5, SLOT(deleteLater()));
-    t5->start();
-
-    QThread *t6 = new QThread;
-    t6->setObjectName("audioreader");
-    audioreader->moveToThread(t6);
-    QObject::connect(t6, SIGNAL(started()), audioreader, SLOT(run()));
-    QObject::connect(audioreader, SIGNAL(finished()), t6, SLOT(quit()));
+    QThread *t3 = new QThread;
+    t3->setObjectName("audioreader");
+    audioreader->moveToThread(t3);
+    QObject::connect(t3, SIGNAL(started()), audioreader, SLOT(run()));
+    QObject::connect(audioreader, SIGNAL(finished()), t3, SLOT(quit()));
     QObject::connect(audioreader, SIGNAL(finished()), audioreader, SLOT(deleteLater()));
-    QObject::connect(t6, SIGNAL(finished()), t6, SLOT(deleteLater()));
-    t6->start();
+    QObject::connect(t3, SIGNAL(finished()), t3, SLOT(deleteLater()));
+    t3->start();
 
+    MainWindow *w;
+    if(!headless)
+    {
+        /// Init GUI
+        ///
+        w = new MainWindow(settings, radio_channels);
+        connectGuiSignals(telnet_server, audiowriter, audioreader, w, mumbleclient, radio_op);
+        /// requires the slots to be set up
+        w->initSettings();
+        w->show();
+        /*
+        if(arguments.length() > 1 && (arguments.indexOf("-f") != -1))
+        {
+            w->showMaximized();
+            w->setWindowFlags( Qt::CustomizeWindowHint | Qt::FramelessWindowHint);
+        }
+        */
+        w->activateWindow();
+        w->raise();
+    }
+
+    /// Connect non-GUI signals
+    ///
+    connectCommandSignals(telnet_server, mumbleclient, radio_op);
+
+    /// Signals independent of GUI or remote interface
+    QObject::connect(radio_op, SIGNAL(writePCM(short*,int,bool,int)),
+                     audiowriter, SLOT(writePCM(short*,int,bool, int)));
+    QObject::connect(radio_op, SIGNAL(setAudioReadMode(bool,bool,int)),
+                     audioreader, SLOT(setReadMode(bool,bool,int)));
+    QObject::connect(audioreader, SIGNAL(audioPCM(short*,int,int, bool)),
+                     radio_op, SLOT(txAudio(short*,int,int, bool)));
+    QObject::connect(radio_op, SIGNAL(voipDataOpus(unsigned char*,int)),
+                     mumbleclient, SLOT(processOpusAudio(unsigned char*, int)));
+    QObject::connect(radio_op, SIGNAL(pingServer()), mumbleclient, SLOT(pingServer()));
+    QObject::connect(radio_op, SIGNAL(voipDataPCM(short*,int)),
+                     mumbleclient, SLOT(processPCMAudio(short*,int)));
+    QObject::connect(mumbleclient, SIGNAL(pcmAudio(short*,int,quint64)),
+                     radio_op, SLOT(processVoipAudioFrame(short*, int, quint64)));
+    QObject::connect(mumbleclient,SIGNAL(newChannels(ChannelList)),
+                     radio_op,SLOT(setChannels(ChannelList)));
+    QObject::connect(mumbleclient,SIGNAL(onlineStations(StationList)),
+                     radio_op,SLOT(setStations(StationList)));
+    QObject::connect(radio_op, SIGNAL(newMumbleMessage(QString)),
+                     mumbleclient, SLOT(newMumbleMessage(QString)));
+    QObject::connect(mumbleclient, SIGNAL(textMessage(QString,bool)),
+                     radio_op, SLOT(textMumble(QString,bool)));
+
+
+    /// Start remote command listener
+    if(headless)
+        telnet_server->start();
+
+    int ret = a.exec();
+
+    /// Cleanup on exit
+    ///
+    if(!headless)
+        delete w;
+    delete telnet_server;
+    delete mumbleclient;
+    radio_channels->saveConfig();
+    delete radio_channels;
+    settings->saveConfig();
+    delete settings;
+    logger->log(Logger::LogLevelInfo, "qradiolink stopping");
+    delete logger;
+    return ret;
+}
+
+
+void connectCommandSignals(TelnetServer *telnet_server, MumbleClient *mumbleclient,
+                       RadioController *radio_op)
+{
+    QObject::connect(telnet_server->command_processor,SIGNAL(startTransmission()),
+                     radio_op,SLOT(startTransmission()));
+    QObject::connect(telnet_server->command_processor,SIGNAL(endTransmission()),
+                     radio_op,SLOT(endTransmission()));
+    QObject::connect(telnet_server->command_processor,SIGNAL(toggleRX(bool)),
+                     radio_op,SLOT(toggleRX(bool)));
+    QObject::connect(telnet_server->command_processor,SIGNAL(toggleTX(bool)),
+                     radio_op,SLOT(toggleTX(bool)));
+    QObject::connect(telnet_server->command_processor,SIGNAL(toggleTxModemMode(int)),
+                     radio_op,SLOT(toggleTxMode(int)));
+    QObject::connect(telnet_server->command_processor,SIGNAL(toggleRxModemMode(int)),
+                     radio_op,SLOT(toggleRxMode(int)));
+    QObject::connect(telnet_server->command_processor,SIGNAL(tuneFreq(qint64)),
+                     radio_op,SLOT(tuneFreq(qint64)));
+    QObject::connect(telnet_server->command_processor,SIGNAL(tuneTxFreq(qint64)),
+                     radio_op,SLOT(tuneTxFreq(qint64)));
+    QObject::connect(telnet_server->command_processor,SIGNAL(changeTxShift(qint64)),
+                     radio_op,SLOT(changeTxShift(qint64)));
+    QObject::connect(telnet_server->command_processor,SIGNAL(startAutoTuneFreq(int, int)),
+                     radio_op,SLOT(startScan(int, int)));
+    QObject::connect(telnet_server->command_processor,SIGNAL(stopAutoTuneFreq()),
+                     radio_op,SLOT(stopScan()));
+    QObject::connect(telnet_server->command_processor,SIGNAL(fineTuneFreq(long)),radio_op,
+                     SLOT(fineTuneFreq(long)));
+    QObject::connect(telnet_server->command_processor,SIGNAL(setTxPower(int)),radio_op,
+                     SLOT(setTxPower(int)));
+    QObject::connect(telnet_server->command_processor,SIGNAL(setAgcAttack(float)),
+                     radio_op,SLOT(setAgcAttack(float)));
+    QObject::connect(telnet_server->command_processor,SIGNAL(setAgcDecay(float)),
+                     radio_op,SLOT(setAgcDecay(float)));
+    QObject::connect(telnet_server->command_processor,SIGNAL(setRxSensitivity(int)),
+                     radio_op,SLOT(setRxSensitivity(int)));
+    QObject::connect(telnet_server->command_processor,SIGNAL(setSquelch(int)),
+                     radio_op,SLOT(setSquelch(int)));
+    QObject::connect(telnet_server->command_processor,SIGNAL(setVolume(int)),
+                     radio_op,SLOT(setVolume(int)));
+    QObject::connect(telnet_server->command_processor,SIGNAL(setTxVolume(int)),
+                     radio_op,SLOT(setTxVolume(int)));
+    QObject::connect(telnet_server->command_processor,SIGNAL(setRxCTCSS(float)),
+                     radio_op,SLOT(setRxCTCSS(float)));
+    QObject::connect(telnet_server->command_processor,SIGNAL(setTxCTCSS(float)),
+                     radio_op,SLOT(setTxCTCSS(float)));
+    QObject::connect(telnet_server->command_processor,SIGNAL(enableGUIConst(bool)),
+                     radio_op,SLOT(enableGUIConst(bool)));
+    QObject::connect(telnet_server->command_processor,SIGNAL(enableGUIFFT(bool)),
+                     radio_op,SLOT(enableGUIFFT(bool)));
+    QObject::connect(telnet_server->command_processor,SIGNAL(enableDuplex(bool)),
+                     radio_op,SLOT(enableDuplex(bool)));
+    QObject::connect(telnet_server->command_processor,SIGNAL(enableRSSI(bool)),
+                     radio_op,SLOT(enableRSSI(bool)));
+    QObject::connect(telnet_server->command_processor,SIGNAL(usePTTForVOIP(bool)),
+                     radio_op,SLOT(usePTTForVOIP(bool)));
+    QObject::connect(telnet_server->command_processor,SIGNAL(setVOIPForwarding(bool)),
+                     radio_op,SLOT(setVOIPForwarding(bool)));
+    QObject::connect(telnet_server->command_processor,SIGNAL(setVox(bool)),
+                     radio_op,SLOT(setVox(bool)));
+    QObject::connect(telnet_server->command_processor,SIGNAL(toggleRepeat(bool)),
+                     radio_op,SLOT(toggleRepeat(bool)));
+    QObject::connect(telnet_server->command_processor,SIGNAL(setCarrierOffset(qint64)),
+                     radio_op,SLOT(setCarrierOffset(qint64)));
+    QObject::connect(telnet_server->command_processor,SIGNAL(newFFTSize(int)),
+                     radio_op,SLOT(setFFTSize(int)));
+    QObject::connect(telnet_server->command_processor,SIGNAL(setWaterfallFPS(int)),
+                     radio_op,SLOT(setFFTPollTime(int)));
+    QObject::connect(telnet_server->command_processor,SIGNAL(setSampleRate(int)),
+                     radio_op,SLOT(setRxSampleRate(int)));
+    QObject::connect(telnet_server->command_processor,SIGNAL(newFilterWidth(int)),
+                     radio_op,SLOT(setFilterWidth(int)));
+    QObject::connect(telnet_server->command_processor,SIGNAL(enableAudioCompressor(bool)),
+                     radio_op,SLOT(enableAudioCompressor(bool)));
+    QObject::connect(telnet_server->command_processor,SIGNAL(enableRelays(bool)),
+                     radio_op,SLOT(enableRelays(bool)));
+    QObject::connect(telnet_server->command_processor,SIGNAL(calibrateRSSI(float)),
+                     radio_op,SLOT(calibrateRSSI(float)));
+    QObject::connect(telnet_server->command_processor,SIGNAL(connectToServer(QString, unsigned)),
+                     mumbleclient,SLOT(connectToServer(QString, unsigned)));
+    QObject::connect(telnet_server->command_processor,SIGNAL(disconnectFromServer()),
+                     mumbleclient,SLOT(disconnectFromServer()));
+    QObject::connect(telnet_server->command_processor,SIGNAL(setMute(bool)),
+                     mumbleclient,SLOT(setMute(bool)));
+    QObject::connect(telnet_server->command_processor,SIGNAL(changeChannel(int)),
+                     mumbleclient,SLOT(joinChannel(int)));
+    QObject::connect(telnet_server->command_processor,SIGNAL(sendText(QString, bool)),
+                     radio_op,SLOT(textData(QString, bool)));
+    QObject::connect(telnet_server->command_processor,SIGNAL(newMumbleMessage(QString)),
+                     mumbleclient,SLOT(newMumbleMessage(QString)));
+    QObject::connect(telnet_server->command_processor,SIGNAL(newCommandMessage(QString,int)),
+                     mumbleclient,SLOT(newCommandMessage(QString,int)));
+    QObject::connect(telnet_server->command_processor,SIGNAL(startMemoryTune(int)),
+                     radio_op,SLOT(startMemoryScan(int)));
+    QObject::connect(telnet_server->command_processor,SIGNAL(stopMemoryTune()),
+                     radio_op,SLOT(stopMemoryScan()));
+    QObject::connect(mumbleclient,SIGNAL(commandMessage(QString,int)),
+                     telnet_server->command_processor,SLOT(parseMumbleMessage(QString,int)));
+}
+
+
+void connectGuiSignals(TelnetServer *telnet_server, AudioWriter *audiowriter,
+                       AudioReader *audioreader, MainWindow *w, MumbleClient *mumbleclient,
+                       RadioController *radio_op)
+{
+    /// GUI to radio and Mumble
     QObject::connect(w,SIGNAL(startTransmission()),radio_op,SLOT(startTransmission()));
     QObject::connect(w,SIGNAL(endTransmission()),radio_op,SLOT(endTransmission()));
     QObject::connect(w,SIGNAL(sendText(QString, bool)),radio_op,SLOT(textData(QString, bool)));
@@ -187,14 +300,18 @@ int main(int argc, char *argv[])
     QObject::connect(w,SIGNAL(changeTxShift(qint64)),radio_op,SLOT(changeTxShift(qint64)));
     QObject::connect(w,SIGNAL(startAutoTuneFreq(int, int)),radio_op,SLOT(startScan(int, int)));
     QObject::connect(w,SIGNAL(stopAutoTuneFreq()),radio_op,SLOT(stopScan()));
-    QObject::connect(w,SIGNAL(startMemoryTune(RadioChannels*, int)),radio_op,SLOT(startMemoryScan(RadioChannels*, int)));
+    QObject::connect(w,SIGNAL(startMemoryTune(int)), radio_op,SLOT(startMemoryScan(int)));
     QObject::connect(w,SIGNAL(stopMemoryTune()),radio_op,SLOT(stopMemoryScan()));
     QObject::connect(w,SIGNAL(fineTuneFreq(long)),radio_op,SLOT(fineTuneFreq(long)));
     QObject::connect(w,SIGNAL(setTxPower(int)),radio_op,SLOT(setTxPower(int)));
-    //QObject::connect(w,SIGNAL(setBbGain(int)),radio_op,SLOT(setBbGain(int)));
+    QObject::connect(w,SIGNAL(setBbGain(int)),radio_op,SLOT(setBbGain(int)));
+    QObject::connect(w,SIGNAL(setAgcAttack(float)),radio_op,SLOT(setAgcAttack(float)));
+    QObject::connect(w,SIGNAL(setAgcDecay(float)),radio_op,SLOT(setAgcDecay(float)));
     QObject::connect(w,SIGNAL(setRxSensitivity(int)),radio_op,SLOT(setRxSensitivity(int)));
     QObject::connect(w,SIGNAL(setSquelch(int)),radio_op,SLOT(setSquelch(int)));
     QObject::connect(w,SIGNAL(setVolume(int)),radio_op,SLOT(setVolume(int)));
+    QObject::connect(w,SIGNAL(setTxVolume(int)),radio_op,SLOT(setTxVolume(int)));
+    QObject::connect(w,SIGNAL(setVoipVolume(int)),radio_op,SLOT(setVoipVolume(int)));
     QObject::connect(w,SIGNAL(setRxCTCSS(float)),radio_op,SLOT(setRxCTCSS(float)));
     QObject::connect(w,SIGNAL(setTxCTCSS(float)),radio_op,SLOT(setTxCTCSS(float)));
     QObject::connect(w,SIGNAL(enableGUIConst(bool)),radio_op,SLOT(enableGUIConst(bool)));
@@ -210,47 +327,65 @@ int main(int argc, char *argv[])
     QObject::connect(w,SIGNAL(newFFTSize(int)),radio_op,SLOT(setFFTSize(int)));
     QObject::connect(w,SIGNAL(setWaterfallFPS(int)),radio_op,SLOT(setFFTPollTime(int)));
     QObject::connect(w,SIGNAL(setSampleRate(int)),radio_op,SLOT(setRxSampleRate(int)));
+    QObject::connect(w,SIGNAL(newFilterWidth(int)),radio_op,SLOT(setFilterWidth(int)));
+    QObject::connect(w,SIGNAL(enableAudioCompressor(bool)),
+                     radio_op,SLOT(enableAudioCompressor(bool)));
+    QObject::connect(w,SIGNAL(enableRelays(bool)),radio_op,SLOT(enableRelays(bool)));
+    QObject::connect(w,SIGNAL(calibrateRSSI(float)), radio_op,SLOT(calibrateRSSI(float)));
+    QObject::connect(w,SIGNAL(setScanResumeTime(int)),
+                     radio_op,SLOT(setScanResumeTime(int)));
+    QObject::connect(w,SIGNAL(connectToServer(QString, unsigned)),
+                     mumbleclient,SLOT(connectToServer(QString, unsigned)));
+    QObject::connect(w,SIGNAL(disconnectFromServer()),mumbleclient,SLOT(disconnectFromServer()));
+    QObject::connect(w,SIGNAL(terminateConnections()),audiowriter,SLOT(stop()));
+    QObject::connect(w,SIGNAL(terminateConnections()),audioreader,SLOT(stop()));
+    QObject::connect(w,SIGNAL(terminateConnections()),telnet_server,SLOT(stop()));
+    QObject::connect(w,SIGNAL(disableRemote()),telnet_server,SLOT(stop()));
+    QObject::connect(w,SIGNAL(enableRemote()),telnet_server,SLOT(start()));
+    QObject::connect(w,SIGNAL(setMute(bool)),mumbleclient,SLOT(setMute(bool)));
+    QObject::connect(w,SIGNAL(changeChannel(int)),mumbleclient,SLOT(joinChannel(int)));
+    QObject::connect(w,SIGNAL(newMumbleMessage(QString)),
+                     mumbleclient,SLOT(newMumbleMessage(QString)));
+    QObject::connect(w,SIGNAL(setSelfDeaf(bool, bool)),
+                     mumbleclient,SLOT(setSelfDeaf(bool, bool)));
+    QObject::connect(w,SIGNAL(setSelfMute(bool)),
+                     mumbleclient,SLOT(setSelfMute(bool)));
 
-    QObject::connect(radio_op, SIGNAL(setAudioReadMode(bool,bool,int)), audioreader, SLOT(setReadMode(bool,bool,int)));
-    QObject::connect(audioreader, SIGNAL(audioPCM(short*,int,int, bool)), radio_op, SLOT(txAudio(short*,int,int, bool)));
+    /// Radio to GUI
     QObject::connect(radio_op, SIGNAL(printText(QString,bool)), w, SLOT(displayText(QString,bool)));
     QObject::connect(radio_op, SIGNAL(printCallsign(QString)), w, SLOT(displayCallsign(QString)));
     QObject::connect(radio_op, SIGNAL(videoImage(QImage)), w, SLOT(displayImage(QImage)));
-    QObject::connect(radio_op, SIGNAL(displayReceiveStatus(bool)), w, SLOT(displayReceiveStatus(bool)));
-    QObject::connect(radio_op, SIGNAL(displayTransmitStatus(bool)), w, SLOT(displayTransmitStatus(bool)));
-    QObject::connect(radio_op, SIGNAL(displayDataReceiveStatus(bool)), w, SLOT(displayDataReceiveStatus(bool)));
-    QObject::connect(radio_op, SIGNAL(freqToGUI(long long, long)), w, SLOT(updateFreqGUI(long long, long)));
-    QObject::connect(radio_op, SIGNAL(pingServer()), client, SLOT(pingServer()));
-    QObject::connect(client, SIGNAL(pcmAudio(short*,int,quint64)), radio_op, SLOT(processVoipAudioFrame(short*, int, quint64)));
-    QObject::connect(radio_op, SIGNAL(voipDataPCM(short*,int)), client, SLOT(processPCMAudio(short*,int)));
-    QObject::connect(radio_op, SIGNAL(writePCM(short*,int,bool,int)), audiowriter, SLOT(writePCM(short*,int,bool, int)));
-    QObject::connect(radio_op, SIGNAL(voipDataOpus(unsigned char*,int)), client, SLOT(processOpusAudio(unsigned char*, int)));
-    QObject::connect(radio_op, SIGNAL(newFFTData(float*,int)), w, SLOT(newFFTData(float*,int)));
+    QObject::connect(radio_op, SIGNAL(displayReceiveStatus(bool)),
+                     w, SLOT(displayReceiveStatus(bool)));
+    QObject::connect(radio_op, SIGNAL(displayTransmitStatus(bool)),
+                     w, SLOT(displayTransmitStatus(bool)));
+    QObject::connect(radio_op, SIGNAL(displayDataReceiveStatus(bool)),
+                     w, SLOT(displayDataReceiveStatus(bool)));
+    QObject::connect(radio_op, SIGNAL(freqToGUI(long long, long)),
+                     w, SLOT(updateFreqGUI(long long, long)));
+    QObject::connect(radio_op, SIGNAL(newFFTData(float*,int)),
+                     w, SLOT(newFFTData(float*,int)));
     QObject::connect(radio_op, SIGNAL(newRSSIValue(float)), w, SLOT(updateRSSI(float)));
-    QObject::connect(radio_op, SIGNAL(newConstellationData(complex_vector*)), w, SLOT(updateConstellation(complex_vector*)));
+    QObject::connect(radio_op, SIGNAL(newConstellationData(complex_vector*)),
+                     w, SLOT(updateConstellation(complex_vector*)));
     QObject::connect(radio_op, SIGNAL(initError(QString)), w, SLOT(initError(QString)));
+    QObject::connect(radio_op, SIGNAL(rxGainStages(gain_vector)),
+                     w, SLOT(setRxGainStages(gain_vector)));
+    QObject::connect(radio_op, SIGNAL(txGainStages(gain_vector)),
+                     w, SLOT(setTxGainStages(gain_vector)));
+    QObject::connect(radio_op, SIGNAL(tuneToMemoryChannel(radiochannel*)),
+                     w, SLOT(tuneToMemoryChannel(radiochannel*)));
 
-    QObject::connect(client,SIGNAL(onlineStations(StationList)),w,SLOT(updateOnlineStations(StationList)));
-    QObject::connect(client,SIGNAL(leftStation(Station*)),w,SLOT(leftStation(Station*)));
-    QObject::connect(client,SIGNAL(userSpeaking(quint64)),w,SLOT(userSpeaking(quint64)));
-    QObject::connect(client,SIGNAL(onlineStations(StationList)),radio_op,SLOT(setStations(StationList)));
-    QObject::connect(client,SIGNAL(textMessage(QString,bool)),w,SLOT(displayVOIPText(QString,bool)));
-    QObject::connect(client,SIGNAL(connectedToServer(QString)),w,SLOT(connectedToServer(QString)));
-    QObject::connect(client,SIGNAL(newChannel(MumbleChannel*)),w,SLOT(newChannel(MumbleChannel*)));
-    QObject::connect(client,SIGNAL(newChannel(MumbleChannel*)),radio_op,SLOT(addChannel(MumbleChannel*)));
-
-    QObject::connect(w,SIGNAL(connectToServer(QString, unsigned)),client,SLOT(connectToServer(QString, unsigned)));
-    QObject::connect(w,SIGNAL(disconnectFromServer()),client,SLOT(disconnectFromServer()));
-    QObject::connect(w,SIGNAL(setMute(bool)),client,SLOT(setMute(bool)));
-    QObject::connect(w,SIGNAL(changeChannel(int)),client,SLOT(joinChannel(int)));
-
-    w->initSettings();
-    int ret = a.exec();
-
-    client->disconnectFromServer();
-    delete w;
-    delete client;
-    delete radio_channels;
-    delete settings;
-    return ret;
+    /// Mumble to GUI
+    QObject::connect(mumbleclient,SIGNAL(onlineStations(StationList)),
+                     w,SLOT(updateOnlineStations(StationList)));
+    QObject::connect(mumbleclient,SIGNAL(userSpeaking(quint64)),w,SLOT(userSpeaking(quint64)));
+    QObject::connect(mumbleclient,SIGNAL(textMessage(QString,bool)),
+                     w,SLOT(displayVOIPText(QString,bool)));
+    QObject::connect(mumbleclient,SIGNAL(connectedToServer(QString)),
+                     w,SLOT(connectedToServer(QString)));
+    QObject::connect(mumbleclient,SIGNAL(newChannels(ChannelList)),
+                     w,SLOT(updateChannels(ChannelList)));
+    QObject::connect(mumbleclient,SIGNAL(joinedChannel(quint64)),w,SLOT(joinedChannel(quint64)));
+    QObject::connect(mumbleclient,SIGNAL(disconnected()),w,SLOT(disconnectedFromServer()));
 }

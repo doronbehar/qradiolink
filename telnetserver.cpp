@@ -18,64 +18,86 @@
 
 static QString CRLF ="\r\n";
 
-TelnetServer::TelnetServer(Settings *settings, DatabaseApi *db, QObject *parent) :
+TelnetServer::TelnetServer(const Settings *settings, Logger *logger, QObject *parent) :
     QObject(parent)
 {
-    _hostname = QHostAddress::Any;
-    _listen_port = CONTROL_PORT;
-    _stop=false;
+    _settings = settings;
+    _logger = logger;
+    command_processor = new CommandProcessor(settings, logger);
     _server = new QTcpServer;
-    _db = db;
-    if(settings->_control_port != 0)
-        _server->listen(_hostname,settings->_control_port);
-    else
-        _server->listen(_hostname,_listen_port);
-    QObject::connect(_server,SIGNAL(newConnection()),this,SLOT(getConnection()));
-    qDebug() << "Telnet server init completed";
+    _hostaddr = QHostAddress::Any;
+    _stop = false;
 }
 
 TelnetServer::~TelnetServer()
 {
-    _server->close();
     delete _server;
-    qDebug() << "Telnet server exiting";
+    delete command_processor;
 }
+
+void TelnetServer::start()
+{
+    if(_server->isListening())
+        return;
+    if(_settings->control_port != 0)
+        _server->listen(_hostaddr,_settings->control_port);
+    else
+        _server->listen(_hostaddr,CONTROL_PORT);
+    QObject::connect(_server,SIGNAL(newConnection()),this,SLOT(getConnection()));
+}
+
 
 void TelnetServer::stop()
 {
+    if(!_server->isListening())
+        return;
     _stop = true;
     for(int i =0;i<_connected_clients.size();i++)
     {
         QTcpSocket *s = _connected_clients.at(i);
-        s->write("Server is stopping now.");
+        s->write("Server is stopping now.\n");
+        s->flush();
         s->disconnectFromHost();
+        delete s;
     }
-    _connected_clients.clear();
+     _connected_clients.clear();
+     QObject::disconnect(_server,SIGNAL(newConnection()),this,SLOT(getConnection()));
+     _server->close();
 }
 
 void TelnetServer::getConnection()
 {
     // ok
     QTcpSocket *socket = _server->nextPendingConnection();
-    qDebug() << "Incoming connection" << socket->peerAddress().toString();
+    _logger->log(Logger::LogLevelInfo, "Incoming connection from: "
+              + socket->peerAddress().toString()
+              + QString(" port: %1").arg(socket->peerPort()));
     if(socket->state() == QTcpSocket::ConnectedState)
-        qDebug() << "Connection established";
+    {
+        _logger->log(Logger::LogLevelInfo, "Connection established");
+        QByteArray response;
+        response.append("Welcome! ");
+        getCommandList(response);
+        response.append("qradiolink> ");
+        socket->write(response);
+        socket->flush();
+    }
 
-    QObject::connect(socket,SIGNAL(error(QAbstractSocket::SocketError )),this,SLOT(connectionFailed(QAbstractSocket::SocketError)));
+    QObject::connect(socket,SIGNAL(error(QAbstractSocket::SocketError )),
+                     this,SLOT(connectionFailed(QAbstractSocket::SocketError)));
     QObject::connect(socket,SIGNAL(connected()),this,SLOT(connectionSuccess()));
     QObject::connect(socket,SIGNAL(readyRead()),this,SLOT(processData()));
     QObject::connect(socket, SIGNAL(disconnected()), socket, SLOT(deleteLater()));
 
     _connected_clients.append(socket);
-
 }
 
 void TelnetServer::connectionFailed(QAbstractSocket::SocketError error)
 {
     Q_UNUSED(error);
-    // ok
+
     QTcpSocket *socket = dynamic_cast<QTcpSocket*>(QObject::sender());
-    qDebug() << "Connection error: " << socket->errorString();
+    _logger->log(Logger::LogLevelInfo, "Connection status: " + socket->errorString());
     int i = _connected_clients.indexOf(socket);
     _connected_clients.remove(i);
 
@@ -84,7 +106,9 @@ void TelnetServer::connectionFailed(QAbstractSocket::SocketError error)
 void TelnetServer::connectionSuccess()
 {
     QTcpSocket *socket = dynamic_cast<QTcpSocket*>(QObject::sender());
-    qDebug() << "Connection established: " << socket->peerAddress().toString() << ":" << socket->peerPort();
+    _logger->log(Logger::LogLevelInfo, "Connection established with: "
+              + socket->peerAddress().toString()
+              + QString(": %1").arg(socket->peerPort()));
 }
 
 
@@ -93,11 +117,22 @@ void TelnetServer::processData()
 
     QTcpSocket *socket = dynamic_cast<QTcpSocket*>(QObject::sender());
     QByteArray data;
+    QElapsedTimer timer;
+    qint64 msec;
+    timer.start();
 
-    bool endOfLine = false;
-
-    while ((!endOfLine))
+    // FIXME: why the sequential read??!!!
+    while (true)
     {
+        msec = (quint64)timer.nsecsElapsed() / 1000000;
+        if(msec > 2)
+        {
+           _logger->log(Logger::LogLevelWarning,
+                        "Receiving packet too large... Dropping.");
+            _connected_clients.remove(_connected_clients.indexOf(socket));
+            socket->close(); // TODO: blacklist?
+            return;
+        }
         char ch;
         if(socket->bytesAvailable()>0)
         {
@@ -107,8 +142,13 @@ void TelnetServer::processData()
                 data.append(ch);
                 if (socket->bytesAvailable()==0)
                 {
-                    endOfLine = true;
+                    break;
                 }
+            }
+            else
+            {
+                _logger->log(Logger::LogLevelCritical,"Telnet server socket read error");
+                break;
             }
         }
         else
@@ -116,54 +156,92 @@ void TelnetServer::processData()
             break;
         }
     }
-    qDebug() << "Good message from: " << socket->peerAddress().toString();
-    QByteArray response = processCommand(data);
-    socket->write(response.data(),response.size());
+    //qDebug() << "Message from: " << socket->peerAddress().toString();
+    QByteArray response = processCommand(data, socket);
+    if(response == "EOF")
+        return;
+    response.append("qradiolink> ");
+    if(response.length() > 0)
+    {
+        socket->write(response.data(),response.size());
+        socket->flush();
+    }
 
 }
 
-QByteArray TelnetServer::processCommand(QByteArray data)
+void TelnetServer::getCommandList(QByteArray &response)
 {
-    quint8 type = static_cast<quint8>(data.at(0));
-    quint8 size = static_cast<quint8>(data.at(1));
-    QByteArray command = data.remove(0,2);
-    if(size < 2)
+    QStringList available_commands = command_processor->listAvailableCommands();
+    response.append("Available commands are: \n");
+    for(int i=0;i<available_commands.length();i++)
     {
-        qDebug() << "Invalid command " << type;
-        return NULL;
+        response.append(available_commands.at(i));
     }
-    if(type == static_cast<quint8>(Parameters))
+    response.append("\n\n");
+}
+
+QByteArray TelnetServer::processCommand(QByteArray data, QTcpSocket *socket)
+{
+    /// sanity checks:
+    if(data.length() > 1080) // not expecting novels
     {
-        QRadioLink::Parameters param;
-        param.ParseFromArray(command.data(),command.size());
-        Station* s=_db->get_station_by_id(param.station_id());
-        param.set_caller_id(s->called_by);
-        param.set_in_call(s->in_call);
-        param.set_channel_id(s->channel_id);
-        quint8 size = param.ByteSize();
-        char bin_data[size+2];
-        param.SerializeToArray(bin_data+2, size);
-        bin_data[0] = static_cast<char>(Parameters);
-        bin_data[1] = static_cast<char>(size);
-        return QByteArray(bin_data, size+2);
+        QByteArray response("");
+        _logger->log(Logger::LogLevelWarning,
+               QString("Received message to large (dropping) from: %1").arg(
+                  socket->peerAddress().toString()));
+        _connected_clients.remove(_connected_clients.indexOf(socket));
+        socket->close();
+        return response;
     }
-    else if(type == static_cast<quint8>(JoinConference))
+    if(data.length() < 1)
     {
-        QRadioLink::JoinConference join;
-        join.ParseFromArray(command.data(),command.size());
-        emit joinConference(join.channel_id(),join.caller_id(),join.server_id());
-        return QByteArray(0);
+        QByteArray response("\n");
+        return response;
     }
-    else if(type == static_cast<quint8>(LeaveConference))
+
+    QString message = QString::fromLocal8Bit(data);
+    if(message == "\r\n")
     {
-        QRadioLink::LeaveConference leave;
-        leave.ParseFromArray(command.data(),command.size());
-        if(leave.leave())
-            emit leaveConference(0,0,0);
-        return QByteArray(0);
+        QByteArray response("\n");
+        return response;
+    }
+    if((message == "exit\r\n") || (message == "quit\r\n") || (message == "\u0004"))
+    {
+        QByteArray response("Bye!\n");
+        socket->write(response.data(),response.size());
+        socket->flush();
+        _connected_clients.remove(_connected_clients.indexOf(socket));
+        socket->close();
+        QByteArray eof("EOF");
+        return eof;
+    }
+    if((message == "help\r\n") || (message == "?\r\n"))
+    {
+        QByteArray response("Available commands:\n");
+        getCommandList(response);
+        return response;
+    }
+
+    /// poked processor logic:
+
+    if(!command_processor->validateCommand(message))
+    {
+        QByteArray response("\e[31mCommand not recognized\e[0m\n");
+        return response;
+    }
+
+    QString result = command_processor->runCommand(message);
+    if(result != "")
+    {
+        QByteArray response;
+        response.append(result.toStdString().c_str());
+        response.append("\n");
+        return response;
     }
     else
     {
-        return QByteArray(0);
+        QByteArray response("Command not processed\n");
+        return response;
     }
+
 }

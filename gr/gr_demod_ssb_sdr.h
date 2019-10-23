@@ -24,6 +24,7 @@
 #include <gnuradio/filter/rational_resampler_base_ccf.h>
 #include <gnuradio/analog/pwr_squelch_cc.h>
 #include <gnuradio/filter/fft_filter_ccc.h>
+#include <gnuradio/filter/fft_filter_fff.h>
 #include <gnuradio/blocks/complex_to_real.h>
 #include <gnuradio/blocks/multiply_const_ff.h>
 #include <gnuradio/analog/rail_ff.h>
@@ -33,16 +34,18 @@ class gr_demod_ssb_sdr;
 
 typedef boost::shared_ptr<gr_demod_ssb_sdr> gr_demod_ssb_sdr_sptr;
 gr_demod_ssb_sdr_sptr make_gr_demod_ssb_sdr(int sps=125, int samp_rate=250000, int carrier_freq=1700,
-                                          int filter_width=8000);
+                                          int filter_width=8000, int sb=0);
 
 class gr_demod_ssb_sdr : public gr::hier_block2
 {
 public:
     explicit gr_demod_ssb_sdr(std::vector<int> signature, int sps=4, int samp_rate=8000, int carrier_freq=1600,
-                               int filter_width=1800);
+                               int filter_width=1800, int sb=0);
 
     void set_squelch(int value);
-
+    void set_filter_width(int filter_width);
+    void set_agc_attack(float value);
+    void set_agc_decay(float value);
 
 private:
 
@@ -50,6 +53,7 @@ private:
     gr::analog::pwr_squelch_cc::sptr _squelch;
     gr::filter::fft_filter_ccc::sptr _filter_usb;
     gr::filter::fft_filter_ccc::sptr _filter_lsb;
+    gr::filter::fft_filter_fff::sptr _audio_filter;
     gr::analog::agc2_cc::sptr _agc;
     gr::analog::feedforward_agc_cc::sptr _feed_forward_agc;
     gr::blocks::complex_to_real::sptr _complex_to_real;
@@ -58,6 +62,7 @@ private:
 
     int _samples_per_symbol;
     int _samp_rate;
+    int _sps;
     int _carrier_freq;
     int _filter_width;
     int _target_samp_rate;

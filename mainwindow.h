@@ -30,6 +30,7 @@
 #include <QPropertyAnimation>
 #include <QPainter>
 #include <QToolTip>
+#include <QAudioDeviceInfo>
 #include <math.h>
 #include <complex>
 #include <libconfig.h++>
@@ -41,9 +42,13 @@
 #include "settings.h"
 #include "mumblechannel.h"
 
-#include <iostream>
 
 typedef std::vector<std::complex<float>> complex_vector;
+typedef QMap<std::string,QVector<int>> gain_vector;
+typedef QVector<MumbleChannel*> ChannelList;
+typedef QVector<Station*> StationList;
+
+
 namespace Ui {
 class MainWindow;
 }
@@ -57,6 +62,7 @@ public slots:
     void endTx();
     void connectVOIPRequested();
     void disconnectVOIPRequested();
+    void disconnectedFromServer();
     void connectedToServer(QString msg);
     void resetSpeechIcons();
     void sendTextRequested();
@@ -68,7 +74,8 @@ public slots:
     void displayTransmitStatus(bool status);
     void displayDataReceiveStatus(bool status);
     void updateOnlineStations(StationList stations);
-    void leftStation(Station *s);
+    void updateChannels(ChannelList channels);
+    void joinedChannel(quint64 channel_id);
     void userSpeaking(quint64 id);
     void toggleRXwin(bool value);
     void toggleTXwin(bool value);
@@ -82,10 +89,11 @@ public slots:
     void setRxSensitivityDisplay(int value);
     void setSquelchDisplay(int value);
     void setVolumeDisplay(int value);
+    void setTxVolumeDisplay(int value);
     void startScan(bool value);
     void displayImage(QImage img);
     void enterFreq();
-    void saveConfig();
+    void saveUiConfig();
     void updateMemories();
     void mainTabChanged(int value);
     void clearTextArea();
@@ -97,7 +105,6 @@ public slots:
     void toggleVOIPForwarding(bool value);
     void toggleVox(bool value);
     void toggleRepeater(bool value);
-    void newChannel(MumbleChannel *chan);
     void channelState(QTreeWidgetItem *item, int k);
     void newFFTData(float* fft_data, int fftsize);
     void carrierOffsetChanged(qint64 freq, qint64 offset);
@@ -119,11 +126,30 @@ public slots:
     void addMemoryChannel();
     void removeMemoryChannel();
     void tuneToMemoryChannel(int row, int col);
+    void tuneToMemoryChannel(radiochannel *chan);
     void editMemoryChannel(QTableWidgetItem* item);
+    void saveMemoryChannes();
     void startMemoryScan(bool value);
-
+    void changeFilterWidth(int low, int up);
+    void setAudioCompressor(bool value);
+    void setRelays(bool value);
+    void setRemoteControl(bool value);
+    void setRSSICalibration();
+    void setDigitalGain(int value);
+    void updateAgcAttack(int value);
+    void updateAgcDecay(int value);
+    void setRxGainStages(gain_vector rx_gains);
+    void setTxGainStages(gain_vector tx_gains);
+    void sendMumbleTextMessage();
+    void toggleSelfDeaf(bool deaf);
+    void toggleSelfMute(bool mute);
+    void changeVoipVolume(int value);
+    void setBurstIPMode(bool value);
+    void setTheme(bool value);
+    void updateScanResumeTime(int value);
 
 signals:
+    void terminateConnections();
     void startTransmission();
     void endTransmission();
     void sendText(QString text, bool repeat);
@@ -140,6 +166,8 @@ signals:
     void setRxSensitivity(int value);
     void setSquelch(int value);
     void setVolume(int value);
+    void setTxVolume(int value);
+    void setVoipVolume(int value);
     void setRxCTCSS(float value);
     void setTxCTCSS(float value);
     void enableGUIConst(bool value);
@@ -148,13 +176,15 @@ signals:
     void enableRSSI(bool value);
     void startAutoTuneFreq(int step, int scan_direction);
     void stopAutoTuneFreq();
-    void startMemoryTune(RadioChannels* channels, int scan_direction);
+    void startMemoryTune(int scan_direction);
     void stopMemoryTune();
     void usePTTForVOIP(bool value);
     void setVOIPForwarding(bool value);
     void setVox(bool value);
     void connectToServer(QString server, unsigned port);
     void disconnectFromServer();
+    void setSelfDeaf(bool deaf, bool mute);
+    void setSelfMute(bool mute);
     void changeChannel(int id);
     void setMute(bool value);
     void toggleRepeat(bool value);
@@ -163,13 +193,24 @@ signals:
     void newFFTSize(int);
     void setWaterfallFPS(int);
     void setSampleRate(int);
+    void newFilterWidth(int);
+    void enableAudioCompressor(bool value);
+    void enableRelays(bool value);
+    void calibrateRSSI(float value);
+    void setBbGain(int value);
+    void setAgcAttack(float value);
+    void setAgcDecay(float value);
+    void newMumbleMessage(QString text);
+    void enableRemote();
+    void disableRemote();
+    void setScanResumeTime(int value);
 
 
 public:
     explicit MainWindow(Settings *settings, RadioChannels *radio_channels, QWidget *parent = 0);
     ~MainWindow();
 
-    void readConfig();
+    void setConfig();
     void initSettings();
 
 private:
@@ -180,7 +221,6 @@ private:
     QFileInfo *setupConfig();
     void setFilterWidth(int index);
 
-    // FIXME: inflation of members
     Ui::MainWindow *ui;
     Settings *_settings;
     RadioChannels *_radio_channels;
@@ -193,30 +233,35 @@ private:
     QGraphicsOpacityEffect *_eff_const;
     QGraphicsOpacityEffect *_eff_video;
     QGraphicsOpacityEffect *_eff_text_display;
+    QGraphicsOpacityEffect *_eff_mem_display;
     std::vector<std::complex<int>> *_filter_widths;
+    std::vector<std::complex<int>> *_filter_ranges;
+    std::vector<bool> *_filter_symmetric;
+    QVector<QString> *_mode_list;
     float *_realFftData;
     float *_iirFftData;
 
-    StationList _user_list;
-    bool _transmitting_radio;
-    qint64 _rx_frequency;
-    qint64 _tx_frequency;
-    qint64 _tx_shift_frequency;
-    int _rx_mode;
-    int _tx_mode;
-    int _current_voip_channel;
-
-    float _fft_averaging;
-    int _waterfall_fps;
-    long _rx_sample_rate;
-    qint64 _demod_offset;
-    float _rssi;
-    bool _range_set;
     QTimer _secondary_text_timer;
     QTimer _video_timer;
     QTimer _speech_icon_timer;
     QMutex _mutex;
+    float _rssi;
+    bool _ptt_activated;
+    int _current_voip_channel;
+
+    StationList _user_list;
+
+    bool _range_set;
     int _new_mem_index;
+    int _filter_low_cut;
+    int _filter_high_cut;
+    bool _filter_is_symmetric;
+
+    QList<QAudioDeviceInfo> _audio_output_devices;
+    QList<QAudioDeviceInfo> _audio_input_devices;
+
+    QVector<QSlider*> _rx_gain_sliders;
+    QVector<QSlider*> _tx_gain_sliders;
 
 };
 

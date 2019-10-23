@@ -14,30 +14,42 @@
 // along with this program; if not, write to the Free Software
 // Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
-#ifndef ALSAAUDIO_H
-#define ALSAAUDIO_H
+#ifndef AUDIOREADER_H
+#define AUDIOREADER_H
 
-#include <alsa/asoundlib.h>
-#include <QObject>
-#include <QString>
-#include <stdio.h>
-#include "ext/utils.h"
+#include <QCoreApplication>
+#include <QMutex>
+#include <QAudioInput>
+#include <QDebug>
+#include "audio/audioprocessor.h"
+#include "settings.h"
+#include "logger.h"
 
-class AlsaAudio
+class AudioReader : public QObject
 {
+    Q_OBJECT
 public:
-    AlsaAudio(QString device, int sample_rate=48000);
-    ~AlsaAudio();
-    int read(float *buf, short bufsize);
-    int write(float *buf, short bufsize);
-    int write_short(short *buf, short bufsize);
-    int read_short(short *buf, short bufsize);
-    int initDevices(QString device);
-    int configureDevices(int sample_rate);
+    explicit AudioReader(const Settings *settings, Logger *logger, QObject *parent = 0);
+
+signals:
+    void finished();
+    void audioPCM(short *pcm, int bytes, int vad, bool radio_only);
+
+public slots:
+    void run();
+    void setReadMode(bool capture, bool preprocess, int audio_mode);
+    void stop();
 
 private:
-    snd_pcm_t *_pcm_rec;
-    snd_pcm_t *_pcm_play;
+    const Settings *_settings;
+    Logger *_logger;
+    QByteArray *_buffer;
+    bool _working;
+    bool _capture_audio;
+    bool _read_preprocess;
+    int _read_audio_mode;
+    QMutex _mutex;
+
 };
 
-#endif // ALSAAUDIO_H
+#endif // AUDIOREADER_H

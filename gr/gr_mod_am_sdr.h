@@ -29,6 +29,7 @@
 #include <gnuradio/blocks/add_ff.h>
 #include <gnuradio/analog/sig_source_f.h>
 #include <gnuradio/blocks/float_to_complex.h>
+#include <gnuradio/analog/rail_ff.h>
 
 class gr_mod_am_sdr;
 
@@ -41,7 +42,8 @@ class gr_mod_am_sdr : public gr::hier_block2
 public:
     explicit gr_mod_am_sdr(int sps=125, int samp_rate=250000, int carrier_freq=1700,
                              int filter_width=8000);
-    void set_bb_gain(int value);
+    void set_filter_width(int filter_width);
+    void set_bb_gain(float value);
 
 private:
     gr::filter::rational_resampler_base_ccf::sptr _resampler;
@@ -55,9 +57,11 @@ private:
     gr::analog::sig_source_f::sptr _signal_source;
     gr::blocks::add_ff::sptr _add;
     gr::blocks::float_to_complex::sptr _float_to_complex;
+    gr::analog::rail_ff::sptr _rail;
 
 
     int _samp_rate;
+    int _sps;
     int _carrier_freq;
     int _filter_width;
 

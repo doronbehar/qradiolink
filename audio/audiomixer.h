@@ -14,15 +14,34 @@
 // along with this program; if not, write to the Free Software
 // Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
-#include "server.h"
+#ifndef AUDIOMIXER_H
+#define AUDIOMIXER_H
 
-Server::Server()
+#include <QObject>
+#include <QDebug>
+#include <QVector>
+#include <QMap>
+#include <QMutex>
+
+class AudioMixer : public QObject
 {
-    _id = 0;
-    _ip = "127.0.0.1";
-    _hostname = "localhost";
-    _connected = 0;
-    _active = 1;
-    _username = "";
-    _password = "";
-}
+    Q_OBJECT
+public:
+    explicit AudioMixer(QObject *parent = nullptr);
+    ~AudioMixer();
+
+signals:
+
+public slots:
+    void addSamples(short *pcm, int samples, int sid);
+    short *mix_samples(float rx_volume);
+    bool buffers_available();
+    void empty();
+
+private:
+    QMap<int, QVector<short>*> _sample_buffers;
+    QMutex _mutex;
+
+};
+
+#endif // AUDIOMIXER_H

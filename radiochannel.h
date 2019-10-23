@@ -24,26 +24,35 @@
 #include <QDir>
 #include <QFileInfo>
 #include <libconfig.h++>
-#include <iostream>
 #include <string>
+#include "logger.h"
 
 struct radiochannel
 {
-    radiochannel() : id(0), rx_frequency(0), tx_frequency(0), tx_shift(0), rx_mode(0), tx_mode(0), name("") {}
+    radiochannel() : id(0), rx_frequency(0), tx_frequency(0),
+        tx_shift(0), rx_mode(0), tx_mode(0), squelch(0), rx_volume(0),
+        tx_power(0), rx_sensitivity(0),rx_ctcss(0), tx_ctcss(0), name(""), skip(0) {}
     int id;
     long long rx_frequency;
     long long tx_frequency;
     long long tx_shift;
     int rx_mode;
     int tx_mode;
+    int squelch;
+    int rx_volume;
+    int tx_power;
+    int rx_sensitivity;
+    float rx_ctcss;
+    float tx_ctcss;
     std::string name;
+    int skip;
 };
 
 class RadioChannels : public QObject
 {
     Q_OBJECT
 public:
-    explicit RadioChannels(QObject *parent = 0);
+    explicit RadioChannels(Logger *logger, QObject *parent = 0);
     ~RadioChannels();
     QFileInfo *setupConfig();
     void readConfig();
@@ -55,6 +64,7 @@ signals:
 public slots:
 
 private:
+    Logger *_logger;
     QFileInfo *_memories_file;
     QVector<radiochannel*> *_channels;
 

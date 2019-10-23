@@ -34,7 +34,7 @@ gr_demod_wbfm_sdr::gr_demod_wbfm_sdr(std::vector<int>signature, int sps, int sam
                       gr::io_signature::make (1, 1, sizeof (gr_complex)),
                       gr::io_signature::makev (2, 2, signature))
 {
-
+    (void) sps;
     _target_samp_rate = 200000;
 
     _samp_rate = samp_rate;
@@ -46,7 +46,7 @@ gr_demod_wbfm_sdr::gr_demod_wbfm_sdr(std::vector<int>signature, int sps, int sam
     std::vector<float> deemph_taps(coeff, coeff + sizeof(coeff) / sizeof(coeff[0]) );
     _deemphasis_filter = gr::filter::fft_filter_fff::make(1,deemph_taps);
 
-    std::vector<float> taps = gr::filter::firdes::low_pass(1, _samp_rate, _filter_width, _filter_width,
+    std::vector<float> taps = gr::filter::firdes::low_pass(1, _samp_rate, _target_samp_rate/2, _target_samp_rate/2,
                                                            gr::filter::firdes::WIN_BLACKMAN_HARRIS);
     std::vector<float> audio_taps = gr::filter::firdes::low_pass(1, _target_samp_rate, 4000, 2000,
                                                                  gr::filter::firdes::WIN_BLACKMAN_HARRIS);
@@ -71,6 +71,17 @@ gr_demod_wbfm_sdr::gr_demod_wbfm_sdr(std::vector<int>signature, int sps, int sam
     connect(_audio_resampler,0,self(),1);
 
 
+}
+
+
+void gr_demod_wbfm_sdr::set_filter_width(int filter_width)
+{
+    _filter_width = filter_width;
+    std::vector<float> filter_taps = gr::filter::firdes::low_pass(
+                                1, _target_samp_rate, _filter_width,1200,gr::filter::firdes::WIN_BLACKMAN_HARRIS);
+
+    _filter->set_taps(filter_taps);
+    _fm_demod->set_gain(_target_samp_rate/(2*M_PI* _filter_width));
 }
 
 

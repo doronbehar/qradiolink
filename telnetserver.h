@@ -22,32 +22,37 @@
 #include <QTcpSocket>
 #include <QString>
 #include <QStringList>
+#include <QRegularExpressionValidator>
 #include <QTime>
 #include <QAbstractSocket>
+#include <QElapsedTimer>
 #include <QVector>
 #include <QHostAddress>
 #include <QDebug>
 #include <QCoreApplication>
-#include "databaseapi.h"
 #include "config_defines.h"
 #include "ext/dec.h"
-#include "ext/QRadioLink.pb.h"
 #include "settings.h"
+#include "station.h"
+#include "commandprocessor.h"
+#include "logger.h"
 
 class TelnetServer : public QObject
 {
     Q_OBJECT
 public:
-    explicit TelnetServer(Settings *settings, DatabaseApi *db, QObject *parent = 0);
+    explicit TelnetServer(const Settings *settings, Logger *logger, QObject *parent = 0);
     ~TelnetServer();
-    void stop();
+
+    CommandProcessor *command_processor; // public needed for signals and slots
+
 
 signals:
     void finished();
-    void joinConference( int number, int id, int server_id);
-    void leaveConference( int number, int id, int server_id);
-public slots:
 
+public slots:
+    void stop();
+    void start();
 
 private slots:
     void getConnection();
@@ -56,17 +61,18 @@ private slots:
     void processData();
 
 private:
+    const Settings *_settings;
+    Logger *_logger;
     QTcpServer *_server;
+    QVector<QTcpSocket*> _connected_clients;
     QTcpSocket _socket;
-    DatabaseApi *_db;
     int _status;
     bool _stop;
-    QHostAddress _hostname;
-    unsigned _listen_port;
-    QVector<QTcpSocket*> _unconnected_clients;
-    QVector<QTcpSocket*> _connected_clients;
-    QByteArray processCommand(QByteArray data);
+    QHostAddress _hostaddr;
 
+
+    QByteArray processCommand(QByteArray data, QTcpSocket *socket);
+    void getCommandList(QByteArray &response);
 };
 
 #endif // TELNETSERVER_H

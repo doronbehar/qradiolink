@@ -16,41 +16,68 @@
 
 #include "relaycontroller.h"
 
-RelayController::RelayController(QObject *parent) : QObject(parent)
+RelayController::RelayController(Logger *logger, QObject *parent) : QObject(parent)
 {
-
+    _logger = logger;
     _ftdi_relay = 0;
     _ftdi_relay_enabled = false;
     _relay_mask = new unsigned char[1];
     memset(_relay_mask,0,1);
+}
 
+RelayController::~RelayController()
+{
+    deinit();
+    delete[] _relay_mask;
+}
+
+void RelayController::init()
+{
+    if(_ftdi_relay_enabled)
+        return;
     if ((_ftdi_relay = ftdi_new()) == 0)
     {
-        std::cerr <<  "Could not open FTDI context" << std::endl;
+        _logger->log(Logger::LogLevelWarning, "Could not open FTDI context");
         return;
     }
     int f = ftdi_usb_open(_ftdi_relay, 0x0403, 0x6001);
     if (f < 0 && f != -5)
     {
-        std::cerr << "Unable to open FTDI FT245R USB FIFO device 0x0403, 0x6001: " << f << " " << ftdi_get_error_string(_ftdi_relay) << std::endl;
+        _logger->log(Logger::LogLevelCritical,
+                QString("Unable to open FTDI FT232 USB FIFO device 0x0403, 0x6001: %1 %2").arg(
+                  f).arg(ftdi_get_error_string(_ftdi_relay)));
         ftdi_free(_ftdi_relay);
         return;
     }
-    std::cout << "Succesfully opened relay" << std::endl;
+    _logger->log(Logger::LogLevelInfo, "Succesfully opened relay");
 
     ftdi_set_bitmode(_ftdi_relay, 0xFF, BITMODE_BITBANG);
     _ftdi_relay_enabled = true;
+    _relay_mask[0] = 0x0;
+    int ret = ftdi_write_data(_ftdi_relay, _relay_mask, 1);
+    if (ret < 0)
+    {
+        _logger->log(Logger::LogLevelCritical,
+                     QString("Disable failed for relays"));
+    }
 }
 
-RelayController::~RelayController()
+void RelayController::deinit()
 {
     if(_ftdi_relay_enabled)
     {
+        _relay_mask[0] = 0x0;
+        int ret = ftdi_write_data(_ftdi_relay, _relay_mask, 1);
+        if (ret < 0)
+        {
+            _logger->log(Logger::LogLevelCritical,
+                         QString("Disable failed for relays"));
+        }
         ftdi_disable_bitbang(_ftdi_relay);
         ftdi_usb_close(_ftdi_relay);
         ftdi_free(_ftdi_relay);
+        _ftdi_relay_enabled = false;
     }
-    delete[] _relay_mask;
 }
 
 int RelayController::enableRelay(int relay_number)
@@ -59,9 +86,9 @@ int RelayController::enableRelay(int relay_number)
     {
         return 1;
     }
-    if(relay_number > 8)
+    if(relay_number > 7)
     {
-        std::cerr << "Relay number not supported" << std::endl;
+        _logger->log(Logger::LogLevelWarning,"Relay number not supported");
         return 0;
     }
 
@@ -69,7 +96,9 @@ int RelayController::enableRelay(int relay_number)
     int ret = ftdi_write_data(_ftdi_relay, _relay_mask, 1);
     if (ret < 0)
     {
-        std::cerr << "Enable failed for relay number " << relay_number << " " << _relay_mask[0] << " " << ftdi_get_error_string(_ftdi_relay) << std::endl;
+        _logger->log(Logger::LogLevelCritical,
+            QString("Enable failed for relay number %1 %2 %3").arg(relay_number).arg(
+                  _relay_mask[0]).arg(ftdi_get_error_string(_ftdi_relay)));
         return 0;
     }
     return 1;
@@ -81,9 +110,9 @@ int RelayController::disableRelay(int relay_number)
     {
         return 1;
     }
-    if(relay_number > 8)
+    if(relay_number > 7)
     {
-        std::cerr << "Relay number not supported" << std::endl;
+       _logger->log(Logger::LogLevelWarning,"Relay number not supported");
         return 0;
     }
 
@@ -91,7 +120,9 @@ int RelayController::disableRelay(int relay_number)
     int ret = ftdi_write_data(_ftdi_relay, _relay_mask, 1);
     if (ret < 0)
     {
-        std::cerr << "Disable failed for relay number " << relay_number << " " << ftdi_get_error_string(_ftdi_relay) << std::endl;
+        _logger->log(Logger::LogLevelCritical,
+                     QString("Disable failed for relay number %1 %2").arg(
+                  relay_number).arg(ftdi_get_error_string(_ftdi_relay)));
         return 0;
     }
     return 1;

@@ -23,47 +23,52 @@
 #include <QDateTime>
 #include <QtEndian>
 #include <QCoreApplication>
+#include <QElapsedTimer>
 #include <string>
-#include <iostream>
 #include <sys/time.h>
 #include <unistd.h>
 #include "ext/Mumble.pb.h"
 #include "ext/PacketDataStream.h"
 #include "ext/utils.h"
 #include "sslclient.h"
-#include "audio/audiointerface.h"
 #include "audio/audioencoder.h"
 #include "config_defines.h"
 #include "settings.h"
 #include "station.h"
 #include "mumblechannel.h"
+#include "logger.h"
 
-typedef QVector<Station> StationList;
+typedef QVector<Station*> StationList;
+typedef QVector<MumbleChannel*> ChannelList;
 class MumbleClient : public QObject
 {
     Q_OBJECT
 public:
-    explicit MumbleClient(Settings *settings, QObject *parent = 0);
+    explicit MumbleClient(const Settings *settings, Logger *logger, QObject *parent = 0);
     ~MumbleClient();
 
 
 signals:
     void connectedToServer(QString message);
+    void disconnected();
     void channelName(QString name);
     void pcmAudio(short *pcm, int size, quint64 session_id);
     void opusAudio(unsigned char *audio, int size, quint64 session_id);
-    void onlineStations(StationList);
+    void onlineStations(StationList stations);
     void newStation(Station* s);
-    void newChannel(MumbleChannel* chan);
+    void newChannels(ChannelList channes);
+    void joinedChannel(quint64 channel_id);
     void leftStation(Station*);
     void channelReady(int chan_number);
     void textMessage(QString msg, bool html);
+    void commandMessage(QString msg, int sender_id);
     void userSound(Station* s);
     void userSpeaking(quint64 id);
     
 public slots:
     void connectToServer(QString address, unsigned port);
     void disconnectFromServer();
+    void cleanup();
     void sendVersion();
     void authenticate();
     void pingServer();
@@ -76,18 +81,21 @@ public slots:
     int getChannelId();
     QString createChannel(QString channel_name="");
     void joinChannel(int id);
-    int callStation(QString radio_id);
+    int unmuteStation(QString radio_id);
     void disconnectFromCall();
-    int disconnectStation(QString radio_id);
-    void disconnectAllStations();
+    int muteStation(QString radio_id);
     void setMute(bool mute);
+    void setSelfMute(bool mute);
+    void setSelfDeaf(bool deaf, bool mute);
     void logMessage(QString log_msg);
+    void newMumbleMessage(QString msg);
+    void newCommandMessage(QString msg, int to_id);
 
 private:
     void sendUDPMessage(quint8 *message, int size);
-    void sendMessage(quint8 *message, quint16 type, int size);
+    void sendProtoMessage(quint8 *message, quint16 type, int size);
     void setupEncryption(quint8 *message, quint64 size);
-
+    void processVersion(quint8 *message, quint64 size);
     void processServerSync(quint8 *message, quint64 size);
     void processChannelState(quint8 *message, quint64 size);
     void processUserState(quint8 *message, quint64 size);
@@ -95,26 +103,32 @@ private:
     void createVoicePacket(unsigned char *encoded_audio, int packet_size);
     void processIncomingAudioPacket(quint8 *data, quint64 size, quint8 type);
     void decodeAudio(unsigned char *audiobuffer, short audiobuffersize, quint8 type, quint64 session_id);
+    void processTextMessage(quint8 *message, quint64 size);
 
+    AudioEncoder *_codec;
+    const Settings *_settings;
+    Logger *_logger;
     SSLClient *_socket_client;
 #ifndef NO_CRYPT
     CryptState *_crypt_state;
 #endif
-    std::string _key;
-    std::string _client_nonce;
-    std::string _server_nonce;
+    QVector<Station*> _stations;
+    QVector<MumbleChannel*> _channels;
+
     QString _temp_channel_name;
     bool _encryption_set;
     bool _synchronized;
     bool _authenticated;
-    int _session_id;
-    int _max_bandwidth;
-    int _channel_id;
-    AudioEncoder *_codec;
-    Settings *_settings;
+    bool _connection_in_progress;
+    quint64 _session_id;
+    quint64 _channel_id;
     quint64 _sequence_number;
-    QVector<Station*> _stations;
+    QElapsedTimer _last_ping_timer;
 
+    /// not used
+    std::string _key;
+    std::string _client_nonce;
+    std::string _server_nonce;
 };
 
 
